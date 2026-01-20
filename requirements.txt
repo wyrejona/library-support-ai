@@ -1,0 +1,10 @@
+google-generativeai
+fastapi
+uvicorn
+openai
+python-dotenv
+pdfplumber
+faiss-cpu
+numpy
+
+pydantic

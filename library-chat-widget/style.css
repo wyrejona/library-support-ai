@@ -1,0 +1,79 @@
+
+#lcw-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 99999;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+#lcw-toggle-btn {
+    background-color: #0073aa;
+    color: white;
+    border: none;
+    border-radius: 50px;
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.2s;
+}
+#lcw-toggle-btn:hover { transform: translateY(-2px); }
+#lcw-chat-window {
+    position: absolute;
+    bottom: 70px;
+    right: 0;
+    width: 350px;
+    height: 500px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: lcw-fade-in 0.2s ease-out;
+}
+@keyframes lcw-fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.lcw-header {
+    background-color: #0073aa;
+    color: white;
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.lcw-header h3 { margin: 0; font-size: 16px; color: white; }
+#lcw-close-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; }
+#lcw-messages {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    background-color: #f9f9f9;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.lcw-message {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+.lcw-message.bot { align-self: flex-start; background: white; border: 1px solid #ddd; color: #333; border-bottom-left-radius: 2px; }
+.lcw-message.user { align-self: flex-end; background: #0073aa; color: white; border-bottom-right-radius: 2px; }
+.lcw-message.bot strong { font-weight: bold; }
+.lcw-message.bot em { font-style: italic; }
+.lcw-input-area {
+    padding: 10px;
+    border-top: 1px solid #eee;
+    background: white;
+    display: flex;
+    gap: 10px;
+}
+#lcw-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; }
+#lcw-send-btn { background: #0073aa; color: white; border: none; padding: 0 20px; border-radius: 20px; cursor: pointer; font-weight: 600; }
+#lcw-send-btn:disabled { background: #ccc; cursor: not-allowed; }
