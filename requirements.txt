@@ -1,10 +1,10 @@
-google-generativeai
 fastapi
 uvicorn
-openai
+python-multipart
 python-dotenv
-pdfplumber
+# google-genai  <-- Removed
+ollama          # <-- New
+sentence-transformers # <-- New
 faiss-cpu
+pypdf
 numpy
-
-pydantic
