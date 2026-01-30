@@ -5,16 +5,15 @@ from app.config import settings
 class OllamaClient:
     def __init__(self):
         self.model = settings.OLLAMA_MODEL
-        self.base_url = settings.OLLAMA_BASE_URL
     
     def generate_response(self, prompt: str, context: str = None, 
                          history: List[Dict[str, str]] = None) -> str:
         """Generate response using Ollama"""
         
         # Build system prompt with context
-        system_prompt = """You are a helpful assistant that answers questions based on the provided context. 
-        If the context doesn't contain relevant information, say so. 
-        Always cite your sources in the format [Source: filename.pdf, Page: X]."""
+        system_prompt = """You are a helpful assistant that answers questions based on provided documents.
+        Always cite sources when available using [Source: filename.pdf, Page: X].
+        If the context doesn't contain relevant information, say so."""
         
         if context:
             system_prompt += f"\n\nContext from documents:\n{context}"

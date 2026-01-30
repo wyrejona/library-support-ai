@@ -16,7 +16,7 @@ def extract_text_from_pdf(pdf_path: str) -> List[Dict[str, Any]]:
             for page_num, page in enumerate(pdf_reader.pages, 1):
                 text = page.extract_text()
                 if text.strip():
-                    # Split text into smaller chunks (e.g., by paragraphs)
+                    # Split by paragraphs
                     paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
                     
                     for paragraph in paragraphs:
@@ -50,6 +50,7 @@ def ingest_pdfs():
             
             chunks = extract_text_from_pdf(pdf_path)
             all_chunks.extend(chunks)
+            print(f"  Extracted {len(chunks)} chunks")
     
     if not all_chunks:
         print("No text extracted from PDFs!")
@@ -63,10 +64,9 @@ def ingest_pdfs():
     vector_store = VectorStore()
     vector_store.create_index(texts, metadata)
     
-    print(f"\nIngestion complete!")
-    print(f"Processed {len(all_chunks)} text chunks")
-    print(f"Index saved to: {settings.FAISS_INDEX_PATH}")
-    print(f"Metadata saved to: {settings.METADATA_PATH}")
+    print(f"\n✅ Ingestion complete!")
+    print(f"   Processed {len(all_chunks)} text chunks")
+    print(f"   Index saved to: {settings.METADATA_PATH}")
 
 if __name__ == "__main__":
     # Create data directory if it doesn't exist

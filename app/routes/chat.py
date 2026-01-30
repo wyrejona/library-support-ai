@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime
 import json
 from typing import List, Optional
 from pydantic import BaseModel
@@ -28,7 +27,7 @@ class ChatResponse(BaseModel):
 # Initialize vector store
 vector_store = VectorStore()
 
-@router.post("", response_model=ChatResponse)
+@router.post("")
 async def chat_endpoint(
     request: ChatRequest,
     db: Session = Depends(get_db),
@@ -78,11 +77,11 @@ async def chat_endpoint(
         from app.database import cleanup_old_logs
         cleanup_old_logs(db)
         
-        return ChatResponse(
-            response=response,
-            sources=sources,
-            query_id=query_log.id
-        )
+        return {
+            "response": response,
+            "sources": sources,
+            "query_id": query_log.id
+        }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

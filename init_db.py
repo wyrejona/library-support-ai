@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Initialize the database with an admin user.
-Run: python init_db.py
+Initialize the database
 """
 import sys
 import os
@@ -24,7 +23,7 @@ def init_database():
         admin = User(
             username="admin",
             email="admin@library.local",
-            hashed_password=get_password_hash("admin123"),  # Change this!
+            hashed_password=get_password_hash("admin123"),
             is_admin=True
         )
         db.add(admin)
@@ -32,17 +31,12 @@ def init_database():
         print("✅ Admin user created:")
         print("   Username: admin")
         print("   Password: admin123")
-        print("   ⚠️  Please change the password immediately!")
     else:
         print("✅ Database already initialized")
-    
-    # Count users
-    user_count = db.query(User).count()
-    print(f"📊 Total users in database: {user_count}")
     
     db.close()
 
 if __name__ == "__main__":
-    print("🚀 Initializing Library AI Assistant Database...")
+    print("🚀 Initializing Database...")
     init_database()
     print("✅ Database initialization complete!")

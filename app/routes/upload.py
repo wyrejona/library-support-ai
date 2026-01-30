@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 import os
 import shutil
 from datetime import datetime
-from typing import List
 from app.database import get_db, UploadedFile, User
 from app.auth import get_current_user
 from app.config import settings
@@ -25,12 +24,12 @@ async def upload_pdf(
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
     
     # Ensure uploads directory exists
-    os.makedirs(settings.PDFS_DIR, exist_ok=True)
+    os.makedirs(settings.pdfs_dir, exist_ok=True)
     
     # Generate unique filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     unique_filename = f"{timestamp}_{file.filename}"
-    file_path = os.path.join(settings.PDFS_DIR, unique_filename)
+    file_path = os.path.join(settings.pdfs_dir, unique_filename)
     
     try:
         # Save file

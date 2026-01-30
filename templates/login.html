@@ -1,116 +1,28 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Library AI Assistant</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <title>Login - Library AI</title>
+    <style>
+        body { font-family: Arial; max-width: 400px; margin: 50px auto; padding: 20px; }
+        input, button { width: 100%; padding: 10px; margin: 10px 0; }
+        button { background: #4361ee; color: white; border: none; cursor: pointer; }
+    </style>
 </head>
 <body>
-    <div class="auth-container">
-        <div class="auth-card">
-            <div class="auth-header">
-                <i class="fas fa-book fa-2x"></i>
-                <h1>Library AI Assistant</h1>
-                <p>Sign in to access your documents</p>
-            </div>
-
-            <div class="auth-tabs">
-                <button class="tab-btn active" onclick="showTab('login')">Login</button>
-                <button class="tab-btn" onclick="showTab('register')">Register</button>
-            </div>
-
-            <form id="login-form" class="auth-form">
-                <div class="form-group">
-                    <label for="login-username">
-                        <i class="fas fa-user"></i> Username
-                    </label>
-                    <input type="text" id="login-username" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="login-password">
-                        <i class="fas fa-lock"></i> Password
-                    </label>
-                    <input type="password" id="login-password" required>
-                </div>
-
-                <button type="submit" class="btn btn-primary btn-block">
-                    <i class="fas fa-sign-in-alt"></i> Sign In
-                </button>
-            </form>
-
-            <form id="register-form" class="auth-form" style="display: none;">
-                <div class="form-group">
-                    <label for="register-username">
-                        <i class="fas fa-user"></i> Username
-                    </label>
-                    <input type="text" id="register-username" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="register-email">
-                        <i class="fas fa-envelope"></i> Email
-                    </label>
-                    <input type="email" id="register-email" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="register-password">
-                        <i class="fas fa-lock"></i> Password
-                    </label>
-                    <input type="password" id="register-password" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="register-password-confirm">
-                        <i class="fas fa-lock"></i> Confirm Password
-                    </label>
-                    <input type="password" id="register-password-confirm" required>
-                </div>
-
-                <button type="submit" class="btn btn-primary btn-block">
-                    <i class="fas fa-user-plus"></i> Register
-                </button>
-            </form>
-
-            <div id="auth-message" class="message"></div>
-
-            <div class="auth-footer">
-                <a href="/" class="back-link">
-                    <i class="fas fa-arrow-left"></i> Back to Home
-                </a>
-            </div>
-        </div>
-    </div>
-
-    <script src="/static/js/app.js"></script>
+    <h2>Login</h2>
+    <form id="loginForm">
+        <input type="text" id="username" placeholder="Username" required>
+        <input type="password" id="password" placeholder="Password" required>
+        <button type="submit">Login</button>
+    </form>
+    <div id="message"></div>
+    
     <script>
-        function showTab(tabName) {
-            // Update active tab button
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
-
-            // Show selected form
-            document.getElementById('login-form').style.display = 
-                tabName === 'login' ? 'block' : 'none';
-            document.getElementById('register-form').style.display = 
-                tabName === 'register' ? 'block' : 'none';
-        }
-
-        // Handle login
-        document.getElementById('login-form').addEventListener('submit', async (e) => {
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            const username = document.getElementById('login-username').value;
-            const password = document.getElementById('login-password').value;
-            
             const formData = new FormData();
-            formData.append('username', username);
-            formData.append('password', password);
+            formData.append('username', document.getElementById('username').value);
+            formData.append('password', document.getElementById('password').value);
             
             try {
                 const response = await fetch('/api/auth/login', {
@@ -122,59 +34,12 @@
                 if (response.ok) {
                     window.location.href = '/dashboard';
                 } else {
-                    showMessage('Invalid username or password', 'error');
+                    document.getElementById('message').textContent = 'Login failed';
                 }
             } catch (error) {
-                showMessage('Login failed. Please try again.', 'error');
+                document.getElementById('message').textContent = 'Error: ' + error;
             }
         });
-
-        // Handle registration
-        document.getElementById('register-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const username = document.getElementById('register-username').value;
-            const email = document.getElementById('register-email').value;
-            const password = document.getElementById('register-password').value;
-            const confirmPassword = document.getElementById('register-password-confirm').value;
-            
-            if (password !== confirmPassword) {
-                showMessage('Passwords do not match', 'error');
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/auth/register', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ username, email, password }),
-                    credentials: 'include'
-                });
-                
-                if (response.ok) {
-                    showMessage('Registration successful! Please login.', 'success');
-                    showTab('login');
-                } else {
-                    const error = await response.json();
-                    showMessage(error.detail || 'Registration failed', 'error');
-                }
-            } catch (error) {
-                showMessage('Registration failed. Please try again.', 'error');
-            }
-        });
-
-        function showMessage(text, type) {
-            const messageDiv = document.getElementById('auth-message');
-            messageDiv.textContent = text;
-            messageDiv.className = `message ${type}`;
-            messageDiv.style.display = 'block';
-            
-            setTimeout(() => {
-                messageDiv.style.display = 'none';
-            }, 5000);
-        }
     </script>
 </body>
 </html>
