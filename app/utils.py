@@ -2,134 +2,147 @@ import os
 import pickle
 import numpy as np
 from typing import List, Dict, Any
-from sentence_transformers import SentenceTransformer
-from app.config import settings
+import hashlib
 
-class LocalEmbedder:
+class SimpleEmbedder:
+    """Simple TF-IDF based embedder without sentence-transformers"""
+    
     def __init__(self):
-        # Uses your installed sentence-transformers
-        self.model = SentenceTransformer(settings.EMBEDDING_MODEL)
+        self.vectorizer = None
+        self.is_fitted = False
+        
+    def fit(self, texts: List[str]):
+        """Fit TF-IDF vectorizer"""
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        
+        self.vectorizer = TfidfVectorizer(
+            max_features=1000,
+            stop_words='english',
+            ngram_range=(1, 2)
+        )
+        self.vectorizer.fit(texts)
+        self.is_fitted = True
     
-    def embed_text(self, text: str) -> np.ndarray:
-        """Generate embeddings for a single text string"""
-        return self.model.encode(text)
+    def encode(self, text: str) -> np.ndarray:
+        """Encode text to vector"""
+        if not self.is_fitted:
+            raise ValueError("Vectorizer not fitted")
+        
+        return self.vectorizer.transform([text]).toarray()[0]
     
-    def embed_documents(self, documents: List[str]) -> np.ndarray:
-        """Generate embeddings for multiple documents"""
-        return self.model.encode(documents)
+    def encode_batch(self, texts: List[str]) -> np.ndarray:
+        """Encode multiple texts"""
+        if not self.is_fitted:
+            raise ValueError("Vectorizer not fitted")
+        
+        return self.vectorizer.transform(texts).toarray()
 
 class VectorStore:
     def __init__(self):
-        self.index = None
+        self.embedder = SimpleEmbedder()
+        self.embeddings = None
         self.metadata = []
-        self.embedder = LocalEmbedder()
-    
+        
     def create_index(self, texts: List[str], metadata: List[Dict[str, Any]]):
-        """Create FAISS index from texts"""
-        embeddings = self.embedder.embed_documents(texts)
+        """Create search index from texts"""
+        print(f"Creating index for {len(texts)} text chunks...")
+        
+        # Fit embedder and generate embeddings
+        self.embedder.fit(texts)
+        self.embeddings = self.embedder.encode_batch(texts)
         self.metadata = metadata
         
-        # Try to use FAISS if available, otherwise use numpy
-        try:
-            import faiss
-            dimension = embeddings.shape[1]
-            self.index = faiss.IndexFlatL2(dimension)
-            self.index.add(embeddings.astype('float32'))
-            self.use_faiss = True
-            
-            # Save FAISS index
-            faiss.write_index(self.index, settings.FAISS_INDEX_PATH)
-            print("✅ Created FAISS index")
-            
-        except ImportError:
-            # Fallback to numpy array
-            self.embeddings = embeddings
-            self.use_faiss = False
-            print("⚠️  FAISS not available, using numpy array for search")
+        # Save to disk
+        self._save()
+        print(f"✅ Index saved with {len(texts)} chunks")
+    
+    def _save(self):
+        """Save index to disk"""
+        os.makedirs("data", exist_ok=True)
         
-        # Save metadata
-        with open(settings.METADATA_PATH, 'wb') as f:
-            pickle.dump({
-                'metadata': metadata,
-                'use_faiss': self.use_faiss
-            }, f)
+        data = {
+            'embeddings': self.embeddings,
+            'metadata': self.metadata,
+            'vocabulary': self.embedder.vectorizer.vocabulary_,
+            'idf': self.embedder.vectorizer.idf_
+        }
+        
+        with open("data/metadata.pkl", 'wb') as f:
+            pickle.dump(data, f)
     
     def load(self):
-        """Load index and metadata from disk"""
-        if not os.path.exists(settings.METADATA_PATH):
+        """Load index from disk"""
+        if not os.path.exists("data/metadata.pkl"):
             return False
         
-        with open(settings.METADATA_PATH, 'rb') as f:
-            data = pickle.load(f)
-        
-        self.metadata = data['metadata']
-        self.use_faiss = data.get('use_faiss', False)
-        
-        if self.use_faiss and os.path.exists(settings.FAISS_INDEX_PATH):
-            try:
-                import faiss
-                self.index = faiss.read_index(settings.FAISS_INDEX_PATH)
-                return True
-            except ImportError:
-                print("❌ FAISS index exists but FAISS not installed")
-                return False
-        elif not self.use_faiss and 'embeddings' in data:
+        try:
+            with open("data/metadata.pkl", 'rb') as f:
+                data = pickle.load(f)
+            
             self.embeddings = data['embeddings']
+            self.metadata = data['metadata']
+            
+            # Recreate vectorizer
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            self.embedder.vectorizer = TfidfVectorizer(
+                vocabulary=data['vocabulary']
+            )
+            self.embedder.vectorizer.idf_ = data['idf']
+            self.embedder.is_fitted = True
+            
+            print(f"✅ Loaded index with {len(self.metadata)} chunks")
             return True
-        
-        return False
+            
+        except Exception as e:
+            print(f"❌ Error loading index: {e}")
+            return False
     
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Search for similar documents"""
         if not self.load():
             return []
         
-        query_embedding = self.embedder.embed_text(query)
+        # Encode query
+        query_embedding = self.embedder.encode(query)
         
-        if self.use_faiss:
-            # FAISS search
-            query_embedding = query_embedding.astype('float32').reshape(1, -1)
-            distances, indices = self.index.search(query_embedding, k)
-            
-            results = []
-            for i, idx in enumerate(indices[0]):
-                if idx < len(self.metadata):
-                    results.append({
-                        'content': self.metadata[idx]['content'],
-                        'source': self.metadata[idx]['source'],
-                        'page': self.metadata[idx].get('page'),
-                        'distance': float(distances[0][i])
-                    })
-        else:
-            # Numpy cosine similarity search
-            from sklearn.metrics.pairwise import cosine_similarity
-            similarities = cosine_similarity(
-                query_embedding.reshape(1, -1), 
-                self.embeddings
-            )[0]
-            
-            top_indices = np.argsort(similarities)[::-1][:k]
-            results = []
-            for idx in top_indices:
-                if idx < len(self.metadata):
-                    results.append({
-                        'content': self.metadata[idx]['content'],
-                        'source': self.metadata[idx]['source'],
-                        'page': self.metadata[idx].get('page'),
-                        'similarity': float(similarities[idx])
-                    })
+        # Calculate cosine similarity
+        from sklearn.metrics.pairwise import cosine_similarity
+        similarities = cosine_similarity(
+            query_embedding.reshape(1, -1), 
+            self.embeddings
+        )[0]
+        
+        # Get top k results
+        top_indices = np.argsort(similarities)[::-1][:k]
+        
+        results = []
+        for idx in top_indices:
+            if idx < len(self.metadata):
+                results.append({
+                    'content': self.metadata[idx]['content'],
+                    'source': self.metadata[idx]['source'],
+                    'page': self.metadata[idx].get('page'),
+                    'similarity': float(similarities[idx])
+                })
         
         return results
 
 def format_context(search_results: List[Dict[str, Any]]) -> str:
-    """Format search results into context string"""
+    """Format search results for LLM context"""
+    if not search_results:
+        return ""
+    
     context_parts = []
-    for i, result in enumerate(search_results):
+    for result in search_results:
         source = result['source']
-        page_info = f" (Page {result['page']})" if result.get('page') else ""
+        page = result.get('page')
+        page_info = f" (page {page})" if page else ""
         content = result['content']
+        
+        # Limit content length
         if len(content) > 500:
             content = content[:500] + "..."
-        context_parts.append(f"[Source: {source}{page_info}]:\n{content}\n")
+        
+        context_parts.append(f"[From {source}{page_info}]: {content}")
     
-    return "\n".join(context_parts)
+    return "\n\n".join(context_parts)

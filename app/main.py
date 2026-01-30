@@ -1,513 +1,691 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
-import uvicorn
 import os
+import shutil
+from datetime import datetime
+from typing import List
+import uvicorn
 
-# Create app first
-app = FastAPI(title="Library AI Assistant")
+# Try to import our modules with error handling
+try:
+    from app.utils import VectorStore
+    vector_store = VectorStore()
+except ImportError as e:
+    print(f"⚠️  Warning: Could not import VectorStore: {e}")
+    vector_store = None
 
-# CORS middleware - use hardcoded values for now
+try:
+    from app.ai.llm import OllamaClient
+    llm_client = OllamaClient()
+except ImportError as e:
+    print(f"⚠️  Warning: Could not import OllamaClient: {e}")
+    llm_client = None
+
+app = FastAPI(title="PDF Chat Assistant")
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Hardcoded for now
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Import database after app creation
-from app.database import create_tables
-
-# Create database tables
-create_tables()
-
-# Import routers after app creation to avoid circular imports
-try:
-    from app.routes import auth, chat, upload
-    app.include_router(auth.router)
-    app.include_router(chat.router)
-    app.include_router(upload.router)
-    print("✅ Routers loaded successfully")
-except Exception as e:
-    print(f"⚠️  Warning: Could not load some routers: {e}")
-
-# Create directories
-os.makedirs("static", exist_ok=True)
-os.makedirs("templates", exist_ok=True)
+# Create necessary directories
 os.makedirs("pdfs", exist_ok=True)
-os.makedirs("app/data", exist_ok=True)
+os.makedirs("data", exist_ok=True)
+os.makedirs("static", exist_ok=True)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.get("/")
-async def root():
-    return HTMLResponse("""
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    return """
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Library AI Assistant</title>
+        <title>PDF Chat Assistant</title>
         <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
-                font-family: Arial, sans-serif;
-                margin: 0;
-                padding: 20px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 min-height: 100vh;
-                color: white;
+                padding: 20px;
             }
             .container {
-                max-width: 800px;
+                max-width: 1200px;
                 margin: 0 auto;
-                background: rgba(255,255,255,0.9);
-                padding: 30px;
+                background: white;
                 border-radius: 10px;
-                color: #333;
+                padding: 30px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             }
-            h1 { color: #333; }
-            .menu {
+            header {
+                text-align: center;
+                margin-bottom: 30px;
+                padding-bottom: 20px;
+                border-bottom: 2px solid #f0f0f0;
+            }
+            h1 {
+                color: #333;
+                margin-bottom: 10px;
+            }
+            .subtitle {
+                color: #666;
+                font-size: 1.1em;
+            }
+            .main-content {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 30px;
+            }
+            .card {
+                background: #f8f9fa;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 20px;
+            }
+            .card h2 {
+                color: #333;
+                margin-bottom: 15px;
                 display: flex;
+                align-items: center;
                 gap: 10px;
-                margin: 20px 0;
+            }
+            .card h2 i { color: #4361ee; }
+            .upload-area {
+                border: 2px dashed #ccc;
+                border-radius: 8px;
+                padding: 40px 20px;
+                text-align: center;
+                cursor: pointer;
+                transition: all 0.3s;
+                background: white;
+            }
+            .upload-area:hover {
+                border-color: #4361ee;
+                background: #f8faff;
+            }
+            .upload-area i {
+                font-size: 48px;
+                color: #4361ee;
+                margin-bottom: 15px;
+            }
+            .upload-area p {
+                color: #666;
+                margin-bottom: 15px;
             }
             .btn {
-                padding: 10px 20px;
-                background: #4361ee;
-                color: white;
-                text-decoration: none;
-                border-radius: 5px;
-            }
-            .btn:hover { background: #3a56d4; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>📚 Library AI Assistant</h1>
-            <p>Upload PDF documents and chat with an AI assistant that answers questions based on your documents.</p>
-            
-            <div class="menu">
-                <a href="/login" class="btn">Login</a>
-                <a href="/dashboard" class="btn">Dashboard</a>
-                <a href="/chat" class="btn">Chat</a>
-                <a href="/health" class="btn">Health Check</a>
-            </div>
-            
-            <h3>Quick Start:</h3>
-            <ol>
-                <li>Login with: admin / admin123</li>
-                <li>Upload PDF files in Dashboard</li>
-                <li>Use the Chat interface to ask questions</li>
-            </ol>
-        </div>
-    </body>
-    </html>
-    """)
-
-@app.get("/login")
-async def login_page():
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Login</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                min-height: 100vh;
-                margin: 0;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            }
-            .login-box {
-                background: white;
-                padding: 40px;
-                border-radius: 10px;
-                box-shadow: 0 5px 20px rgba(0,0,0,0.2);
-                width: 300px;
-            }
-            input, button {
-                width: 100%;
-                padding: 10px;
-                margin: 10px 0;
-                box-sizing: border-box;
-            }
-            button {
                 background: #4361ee;
                 color: white;
                 border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
                 cursor: pointer;
-                border-radius: 5px;
+                font-size: 16px;
+                transition: background 0.3s;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
             }
-            button:hover { background: #3a56d4; }
-            .error { color: red; margin: 10px 0; }
+            .btn:hover { background: #3a56d4; }
+            .btn-secondary {
+                background: #7209b7;
+            }
+            .btn-secondary:hover { background: #5a08a0; }
+            input[type="file"] { display: none; }
+            .file-list {
+                max-height: 200px;
+                overflow-y: auto;
+                margin-top: 15px;
+            }
+            .file-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 10px;
+                background: white;
+                border-radius: 6px;
+                margin-bottom: 5px;
+                border: 1px solid #eee;
+            }
+            .chat-container {
+                display: flex;
+                flex-direction: column;
+                height: 500px;
+            }
+            .chat-messages {
+                flex: 1;
+                overflow-y: auto;
+                padding: 15px;
+                background: white;
+                border-radius: 8px;
+                border: 1px solid #eee;
+                margin-bottom: 15px;
+            }
+            .message {
+                margin-bottom: 15px;
+                padding: 12px 15px;
+                border-radius: 8px;
+                max-width: 80%;
+            }
+            .user-message {
+                background: #e3f2fd;
+                margin-left: auto;
+            }
+            .bot-message {
+                background: #f5f5f5;
+            }
+            .chat-input {
+                display: flex;
+                gap: 10px;
+            }
+            .chat-input textarea {
+                flex: 1;
+                padding: 12px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                resize: none;
+                font-family: inherit;
+                font-size: 16px;
+            }
+            .chat-input button {
+                padding: 12px 24px;
+                white-space: nowrap;
+            }
+            .status {
+                padding: 10px;
+                border-radius: 6px;
+                margin: 10px 0;
+                display: none;
+            }
+            .status.success { background: #d4edda; color: #155724; }
+            .status.error { background: #f8d7da; color: #721c24; }
+            .status.info { background: #d1ecf1; color: #0c5460; }
+            @media (max-width: 768px) {
+                .main-content { grid-template-columns: 1fr; }
+                .container { padding: 15px; }
+            }
         </style>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     </head>
     <body>
-        <div class="login-box">
-            <h2>Login</h2>
-            <form id="loginForm">
-                <input type="text" id="username" placeholder="Username" required>
-                <input type="password" id="password" placeholder="Password" required>
-                <button type="submit">Login</button>
-            </form>
-            <div id="message" class="error"></div>
-            <p>Default: admin / admin123</p>
-        </div>
-        
-        <script>
-            document.getElementById('loginForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const formData = new FormData();
-                formData.append('username', document.getElementById('username').value);
-                formData.append('password', document.getElementById('password').value);
-                
-                try {
-                    const response = await fetch('/api/auth/login', {
-                        method: 'POST',
-                        body: formData,
-                        credentials: 'include'
-                    });
-                    
-                    if (response.ok) {
-                        window.location.href = '/dashboard';
-                    } else {
-                        document.getElementById('message').textContent = 'Login failed';
-                    }
-                } catch (error) {
-                    document.getElementById('message').textContent = 'Error: ' + error;
-                }
-            });
-        </script>
-    </body>
-    </html>
-    """)
-
-@app.get("/dashboard")
-async def dashboard():
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Dashboard</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            .card { 
-                border: 1px solid #ddd; 
-                padding: 20px; 
-                margin: 10px 0; 
-                border-radius: 5px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            }
-            button, .btn { 
-                background: #4361ee; 
-                color: white; 
-                border: none; 
-                padding: 10px 20px; 
-                cursor: pointer;
-                text-decoration: none;
-                display: inline-block;
-                border-radius: 5px;
-                margin: 5px;
-            }
-            button:hover, .btn:hover { background: #3a56d4; }
-            input[type="file"] { margin: 10px 0; }
-        </style>
-    </head>
-    <body>
-        <h1>Dashboard</h1>
-        
-        <div class="card">
-            <h3>📄 Upload PDF</h3>
-            <input type="file" id="pdfFile" accept=".pdf">
-            <button onclick="uploadPDF()">Upload PDF</button>
-            <div id="uploadStatus"></div>
-        </div>
-        
-        <div class="card">
-            <h3>💬 Chat with Documents</h3>
-            <a href="/chat" class="btn">Go to Chat Interface</a>
-        </div>
-        
-        <div class="card">
-            <h3>🔄 Create Search Index</h3>
-            <button onclick="createIndex()">Create/Update Index</button>
-            <div id="indexStatus"></div>
-        </div>
-        
-        <div class="card">
-            <h3>📊 Your Files</h3>
-            <button onclick="listFiles()">Refresh File List</button>
-            <div id="fileList"></div>
-        </div>
-        
-        <script>
-            async function uploadPDF() {
-                const fileInput = document.getElementById('pdfFile');
-                if (!fileInput.files[0]) {
-                    alert('Please select a PDF file');
-                    return;
-                }
-                
-                const formData = new FormData();
-                formData.append('file', fileInput.files[0]);
-                
-                try {
-                    document.getElementById('uploadStatus').innerHTML = 'Uploading...';
-                    const response = await fetch('/api/upload/pdf', {
-                        method: 'POST',
-                        body: formData,
-                        credentials: 'include'
-                    });
-                    
-                    if (response.ok) {
-                        document.getElementById('uploadStatus').innerHTML = '✅ File uploaded successfully!';
-                        fileInput.value = '';
-                    } else {
-                        document.getElementById('uploadStatus').innerHTML = '❌ Upload failed';
-                    }
-                } catch (error) {
-                    document.getElementById('uploadStatus').innerHTML = 'Error: ' + error;
-                }
-            }
+        <div class="container">
+            <header>
+                <h1><i class="fas fa-robot"></i> PDF Chat Assistant</h1>
+                <p class="subtitle">Upload PDFs and chat with an AI that reads your documents</p>
+            </header>
             
-            async function createIndex() {
-                try {
-                    document.getElementById('indexStatus').innerHTML = 'Creating index...';
-                    const response = await fetch('/ingest', {
-                        method: 'POST',
-                        credentials: 'include'
-                    });
+            <div class="main-content">
+                <!-- Left Column: Upload & Files -->
+                <div>
+                    <div class="card">
+                        <h2><i class="fas fa-upload"></i> Upload PDF</h2>
+                        <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <p>Click to browse or drag & drop PDF files</p>
+                            <button class="btn"><i class="fas fa-folder-open"></i> Browse Files</button>
+                        </div>
+                        <input type="file" id="fileInput" accept=".pdf" multiple onchange="handleFiles(this.files)">
+                        
+                        <div id="uploadStatus" class="status"></div>
+                        
+                        <div id="fileList" class="file-list"></div>
+                    </div>
                     
-                    const result = await response.json();
-                    if (result.success) {
-                        document.getElementById('indexStatus').innerHTML = '✅ Index created successfully!';
-                    } else {
-                        document.getElementById('indexStatus').innerHTML = '❌ Error: ' + result.error;
-                    }
-                } catch (error) {
-                    document.getElementById('indexStatus').innerHTML = 'Error: ' + error;
-                }
-            }
-            
-            async function listFiles() {
-                try {
-                    const response = await fetch('/api/upload/files', {
-                        credentials: 'include'
-                    });
+                    <div class="card">
+                        <h2><i class="fas fa-cogs"></i> Actions</h2>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="btn" onclick="processPDFs()">
+                                <i class="fas fa-brain"></i> Process PDFs
+                            </button>
+                            <button class="btn btn-secondary" onclick="clearFiles()">
+                                <i class="fas fa-trash"></i> Clear All
+                            </button>
+                            <button class="btn" onclick="checkHealth()">
+                                <i class="fas fa-heartbeat"></i> Check Health
+                            </button>
+                        </div>
+                        <div id="actionStatus" class="status"></div>
+                    </div>
                     
-                    const files = await response.json();
-                    const fileList = document.getElementById('fileList');
-                    
-                    if (files.length === 0) {
-                        fileList.innerHTML = '<p>No files uploaded yet</p>';
-                        return;
-                    }
-                    
-                    let html = '<ul>';
-                    files.forEach(file => {
-                        html += `<li>${file.original_filename} (${formatFileSize(file.file_size)})</li>`;
-                    });
-                    html += '</ul>';
-                    fileList.innerHTML = html;
-                    
-                } catch (error) {
-                    document.getElementById('fileList').innerHTML = 'Error loading files';
-                }
-            }
-            
-            function formatFileSize(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-            }
-        </script>
-    </body>
-    </html>
-    """)
-
-@app.get("/chat")
-async def chat_page():
-    return HTMLResponse("""
-    <!DOCTYPE html>
-<html>
-<head>
-    <title>Chat Interface</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-        .chat-container { max-width: 800px; margin: 0 auto; background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .chat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #4361ee; }
-        .chat-messages { height: 400px; overflow-y: auto; padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 20px; }
-        .message { margin: 10px 0; padding: 10px; border-radius: 5px; }
-        .user-message { background: #e3f2fd; text-align: right; }
-        .bot-message { background: #f5f5f5; }
-        .chat-input { display: flex; gap: 10px; }
-        .chat-input textarea { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 5px; resize: vertical; }
-        .chat-input button { padding: 10px 20px; background: #4361ee; color: white; border: none; border-radius: 5px; cursor: pointer; }
-        .chat-input button:hover { background: #3a56d4; }
-        .source { font-size: 12px; color: #666; margin-top: 5px; }
-    </style>
-</head>
-<body>
-    <div class="chat-container">
-        <div class="chat-header">
-            <h1>💬 Chat with Your Documents</h1>
-            <a href="/dashboard" style="color: #4361ee;">← Back to Dashboard</a>
-        </div>
-        
-        <div class="chat-messages" id="chatMessages">
-            <div class="message bot-message">
-                👋 Hello! I'm your document assistant. Ask me questions about your uploaded PDF files.
+                    <div class="card">
+                        <h2><i class="fas fa-info-circle"></i> How It Works</h2>
+                        <ol style="margin-left: 20px; color: #555;">
+                            <li>Upload PDF files using the upload area</li>
+                            <li>Click "Process PDFs" to make them searchable</li>
+                            <li>Ask questions in the chat on the right</li>
+                            <li>The AI will answer based on your documents</li>
+                        </ol>
+                    </div>
+                </div>
+                
+                <!-- Right Column: Chat -->
+                <div>
+                    <div class="card">
+                        <h2><i class="fas fa-comments"></i> Chat with Documents</h2>
+                        <div class="chat-container">
+                            <div class="chat-messages" id="chatMessages">
+                                <div class="message bot-message">
+                                    <strong>AI Assistant:</strong> Hello! Upload PDF files and click "Process PDFs" to start chatting about your documents.
+                                </div>
+                            </div>
+                            
+                            <div class="chat-input">
+                                <textarea id="messageInput" placeholder="Ask a question about your documents..." rows="3"></textarea>
+                                <button class="btn" onclick="sendMessage()">
+                                    <i class="fas fa-paper-plane"></i> Send
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 15px; display: flex; gap: 10px;">
+                            <button class="btn" onclick="clearChat()">
+                                <i class="fas fa-broom"></i> Clear Chat
+                            </button>
+                            <div style="flex: 1;"></div>
+                            <label style="display: flex; align-items: center; gap: 5px; color: #555;">
+                                <input type="checkbox" id="useContext" checked> Use document context
+                            </label>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
-        <div class="chat-input">
-            <textarea id="messageInput" placeholder="Ask a question about your documents..." rows="3"></textarea>
-            <button onclick="sendMessage()">Send</button>
-        </div>
-        
-        <div style="margin-top: 20px;">
-            <button onclick="clearChat()" style="background: #666;">Clear Chat</button>
-            <button onclick="toggleContext()" style="background: #7209b7;">Toggle Context: <span id="contextStatus">On</span></button>
-        </div>
-    </div>
-
-    <script>
-        let useContext = true;
-        let chatHistory = [];
-        
-        function toggleContext() {
-            useContext = !useContext;
-            document.getElementById('contextStatus').textContent = useContext ? 'On' : 'Off';
-        }
-        
-        async function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const message = input.value.trim();
-            if (!message) return;
+        <script>
+            let uploadedFiles = [];
+            let chatHistory = [];
             
-            // Add user message to chat
-            addMessage(message, 'user');
-            input.value = '';
+            function showStatus(elementId, message, type = 'info') {
+                const element = document.getElementById(elementId);
+                element.textContent = message;
+                element.className = `status ${type}`;
+                element.style.display = 'block';
+                setTimeout(() => element.style.display = 'none', 5000);
+            }
             
-            try {
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: message,
-                        history: chatHistory,
-                        use_context: useContext
-                    }),
-                    credentials: 'include'
-                });
+            function handleFiles(files) {
+                if (files.length === 0) return;
                 
-                const data = await response.json();
-                
-                // Add bot response to chat
-                addMessage(data.response, 'bot', data.sources);
-                
-                // Update chat history
-                chatHistory.push({ role: 'user', content: message });
-                chatHistory.push({ role: 'assistant', content: data.response });
-                
-                // Keep only last 10 messages
-                if (chatHistory.length > 10) {
-                    chatHistory = chatHistory.slice(-10);
+                const formData = new FormData();
+                for (let i = 0; i < files.length; i++) {
+                    if (files[i].type === 'application/pdf' || files[i].name.toLowerCase().endsWith('.pdf')) {
+                        formData.append('files', files[i]);
+                        uploadedFiles.push(files[i].name);
+                    }
                 }
                 
-            } catch (error) {
-                addMessage('Error: Could not get response', 'bot');
-            }
-        }
-        
-        function addMessage(content, sender, sources = []) {
-            const messagesDiv = document.getElementById('chatMessages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender}-message`;
-            messageDiv.innerHTML = content.replace(/\\n/g, '<br>');
-            
-            if (sources && sources.length > 0) {
-                const sourceDiv = document.createElement('div');
-                sourceDiv.className = 'source';
-                sourceDiv.innerHTML = '<strong>Sources:</strong> ' + 
-                    sources.map(s => `${s.source}${s.page ? ' (Page ' + s.page + ')' : ''}`).join(', ');
-                messageDiv.appendChild(sourceDiv);
+                if (formData.has('files')) {
+                    uploadFiles(formData);
+                } else {
+                    showStatus('uploadStatus', 'Please select PDF files only', 'error');
+                }
             }
             
-            messagesDiv.appendChild(messageDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-        
-        function clearChat() {
-            document.getElementById('chatMessages').innerHTML = 
-                '<div class="message bot-message">👋 Chat cleared. Ask me questions about your documents.</div>';
-            chatHistory = [];
-        }
-        
-        // Allow Enter to send (Shift+Enter for new line)
-        document.getElementById('messageInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            async function uploadFiles(formData) {
+                try {
+                    showStatus('uploadStatus', 'Uploading files...', 'info');
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (response.ok) {
+                        const result = await response.json();
+                        showStatus('uploadStatus', `Uploaded ${result.count} file(s) successfully!`, 'success');
+                        updateFileList();
+                        document.getElementById('fileInput').value = '';
+                    } else {
+                        showStatus('uploadStatus', 'Upload failed', 'error');
+                    }
+                } catch (error) {
+                    showStatus('uploadStatus', 'Error: ' + error, 'error');
+                }
+            }
+            
+            function updateFileList() {
+                const fileList = document.getElementById('fileList');
+                if (uploadedFiles.length === 0) {
+                    fileList.innerHTML = '<p style="color: #666; text-align: center;">No files uploaded yet</p>';
+                    return;
+                }
+                
+                let html = '<h3>Uploaded Files:</h3>';
+                uploadedFiles.forEach((file, index) => {
+                    html += `
+                        <div class="file-item">
+                            <span><i class="fas fa-file-pdf"></i> ${file}</span>
+                            <button onclick="removeFile(${index})" style="background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    `;
+                });
+                fileList.innerHTML = html;
+            }
+            
+            function removeFile(index) {
+                uploadedFiles.splice(index, 1);
+                updateFileList();
+            }
+            
+            async function processPDFs() {
+                try {
+                    showStatus('actionStatus', 'Processing PDFs and creating search index...', 'info');
+                    const response = await fetch('/ingest', { method: 'POST' });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        showStatus('actionStatus', '✅ PDFs processed successfully! You can now chat about your documents.', 'success');
+                        addChatMessage('AI Assistant: Your documents have been processed and are ready for questions!', 'bot');
+                    } else {
+                        showStatus('actionStatus', 'Error: ' + (result.error || 'Unknown error'), 'error');
+                    }
+                } catch (error) {
+                    showStatus('actionStatus', 'Error: ' + error, 'error');
+                }
+            }
+            
+            async function clearFiles() {
+                if (confirm('Are you sure you want to remove all uploaded files?')) {
+                    try {
+                        const response = await fetch('/clear', { method: 'POST' });
+                        if (response.ok) {
+                            uploadedFiles = [];
+                            updateFileList();
+                            showStatus('actionStatus', 'All files cleared', 'success');
+                        }
+                    } catch (error) {
+                        showStatus('actionStatus', 'Error clearing files', 'error');
+                    }
+                }
+            }
+            
+            async function checkHealth() {
+                try {
+                    const response = await fetch('/health');
+                    const data = await response.json();
+                    
+                    let statusMessage = `System Status:<br>`;
+                    statusMessage += `• Ollama: ${data.ollama_available ? '✅ Available' : '❌ Not Available'}<br>`;
+                    statusMessage += `• PDFs: ${data.pdf_count} file(s)<br>`;
+                    statusMessage += `• Index: ${data.index_exists ? '✅ Ready' : '❌ Not Ready'}<br>`;
+                    statusMessage += `• Model: ${data.ollama_model || 'Not loaded'}`;
+                    
+                    showStatus('actionStatus', statusMessage, 'info');
+                } catch (error) {
+                    showStatus('actionStatus', 'Health check failed', 'error');
+                }
+            }
+            
+            async function sendMessage() {
+                const input = document.getElementById('messageInput');
+                const message = input.value.trim();
+                if (!message) return;
+                
+                // Add user message to chat
+                addChatMessage(`You: ${message}`, 'user');
+                input.value = '';
+                
+                // Get context setting
+                const useContext = document.getElementById('useContext').checked;
+                
+                try {
+                    const response = await fetch('/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: message,
+                            use_context: useContext
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    // Add bot response to chat
+                    let botMessage = `AI Assistant: ${data.response}`;
+                    if (data.sources && data.sources.length > 0) {
+                        botMessage += `<br><small style="color: #666;">Sources: ${data.sources.map(s => s.source).join(', ')}</small>`;
+                    }
+                    addChatMessage(botMessage, 'bot');
+                    
+                } catch (error) {
+                    addChatMessage(`AI Assistant: Error - Could not get response. Make sure Ollama is running.`, 'bot');
+                }
+            }
+            
+            function addChatMessage(content, sender) {
+                const messagesDiv = document.getElementById('chatMessages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${sender}-message`;
+                messageDiv.innerHTML = content;
+                messagesDiv.appendChild(messageDiv);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+            
+            function clearChat() {
+                document.getElementById('chatMessages').innerHTML = `
+                    <div class="message bot-message">
+                        <strong>AI Assistant:</strong> Chat cleared. Upload PDFs and click "Process PDFs" to start chatting about your documents.
+                    </div>
+                `;
+                chatHistory = [];
+            }
+            
+            // Allow Enter to send (Shift+Enter for new line)
+            document.getElementById('messageInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+            
+            // Drag and drop support
+            const uploadArea = document.querySelector('.upload-area');
+            uploadArea.addEventListener('dragover', (e) => {
                 e.preventDefault();
-                sendMessage();
+                uploadArea.style.borderColor = '#4361ee';
+                uploadArea.style.background = '#f8faff';
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.style.borderColor = '#ccc';
+                uploadArea.style.background = 'white';
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.style.borderColor = '#ccc';
+                uploadArea.style.background = 'white';
+                handleFiles(e.dataTransfer.files);
+            });
+            
+            // Initialize
+            updateFileList();
+            checkHealth();
+        </script>
+    </body>
+    </html>
+    """
+
+@app.post("/upload")
+async def upload_files(files: List[UploadFile] = File(...)):
+    """Upload PDF files"""
+    saved_files = []
+    
+    for file in files:
+        if not file.filename.lower().endswith('.pdf'):
+            continue
+            
+        # Create unique filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{timestamp}_{file.filename}"
+        filepath = os.path.join("pdfs", filename)
+        
+        # Save file
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        saved_files.append(filename)
+    
+    return {
+        "message": "Files uploaded successfully",
+        "count": len(saved_files),
+        "files": saved_files
+    }
+
+@app.get("/files")
+async def list_files():
+    """List uploaded PDF files"""
+    if not os.path.exists("pdfs"):
+        return {"files": []}
+    
+    files = []
+    for filename in os.listdir("pdfs"):
+        if filename.lower().endswith('.pdf'):
+            filepath = os.path.join("pdfs", filename)
+            size = os.path.getsize(filepath)
+            files.append({
+                "name": filename,
+                "size": size,
+                "uploaded": datetime.fromtimestamp(os.path.getctime(filepath)).isoformat()
+            })
+    
+    return {"files": files}
+
+@app.post("/clear")
+async def clear_all_files():
+    """Remove all uploaded files"""
+    if os.path.exists("pdfs"):
+        for filename in os.listdir("pdfs"):
+            filepath = os.path.join("pdfs", filename)
+            if os.path.isfile(filepath):
+                os.remove(filepath)
+    
+    # Also clear vector index
+    index_files = ["data/library_index.faiss", "data/metadata.pkl"]
+    for file in index_files:
+        if os.path.exists(file):
+            os.remove(file)
+    
+    return {"message": "All files cleared"}
+
+@app.post("/ingest")
+async def ingest_pdfs():
+    """Process PDFs and create search index"""
+    try:
+        # Import here to avoid circular imports
+        from ingest import main as ingest_main
+        
+        # Run ingestion
+        import subprocess
+        result = subprocess.run(["python", "ingest.py"], capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "message": "PDFs processed successfully",
+                "output": result.stdout
             }
-        });
-    </script>
-</body>
-</html>
-    """)
+        else:
+            return {
+                "success": False,
+                "error": result.stderr or "Ingestion failed",
+                "output": result.stdout
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/chat")
+async def chat(message: dict):
+    """Chat with the AI about documents"""
+    try:
+        user_message = message.get("message", "")
+        use_context = message.get("use_context", True)
+        
+        context = ""
+        sources = []
+        
+        if use_context:
+            # Search for relevant context
+            search_results = vector_store.search(user_message, k=5)
+            if search_results:
+                from app.utils import format_context
+                context = format_context(search_results)
+                sources = [{
+                    'source': result['source'],
+                    'page': result.get('page')
+                } for result in search_results]
+        
+        # Get response from LLM
+        response = llm_client.generate_response(
+            prompt=user_message,
+            context=context
+        )
+        
+        return {
+            "response": response,
+            "sources": sources
+        }
+        
+    except Exception as e:
+        return {
+            "response": f"Error: {str(e)}",
+            "sources": []
+        }
 
 @app.get("/health")
 async def health_check():
+    """Check system health"""
     import sys
     
     # Check Ollama
-    ollama_status = "unknown"
+    ollama_available = False
+    ollama_model = None
     try:
         import ollama
-        ollama_status = "available"
-    except ImportError:
-        ollama_status = "not installed"
+        models = ollama.list()
+        ollama_available = bool(models.get('models'))
+        if ollama_available and models['models']:
+            ollama_model = models['models'][0]['model']
+    except:
+        ollama_available = False
     
-    # Check database
-    db_exists = os.path.exists("app/data/library.db")
+    # Check PDFs
+    pdf_count = 0
+    if os.path.exists("pdfs"):
+        pdf_count = len([f for f in os.listdir("pdfs") if f.lower().endswith('.pdf')])
     
-    return JSONResponse({
+    # Check index
+    index_exists = os.path.exists("data/metadata.pkl")
+    
+    return {
         "status": "ok",
-        "service": "Library AI Assistant",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
-        "ollama": ollama_status,
-        "database": "exists" if db_exists else "missing",
-        "pdfs_directory": os.path.exists("pdfs"),
-        "data_directory": os.path.exists("app/data")
-    })
-
-# Add ingest endpoint
-@app.post("/ingest")
-async def trigger_ingestion():
-    try:
-        import subprocess
-        result = subprocess.run(["python", "ingest_local.py"], capture_output=True, text=True)
-        return {
-            "success": result.returncode == 0,
-            "output": result.stdout,
-            "error": result.stderr
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        "ollama_available": ollama_available,
+        "ollama_model": ollama_model,
+        "pdf_count": pdf_count,
+        "index_exists": index_exists
+    }
 
 if __name__ == "__main__":
-    print("🚀 Starting Library AI Assistant...")
+    print("🚀 Starting PDF Chat Assistant...")
     print("📚 Open browser to: http://localhost:8000")
-    print("🔑 Default login: admin / admin123")
-    print("\n📂 Directory structure:")
-    print(f"   PDFs folder: {os.path.abspath('pdfs')}")
-    print(f"   Database: {os.path.abspath('app/data/library.db')}")
+    print("\nRequirements:")
+    print("• Make sure Ollama is running: ollama serve")
+    print("• Upload PDFs using the web interface")
+    print("• Click 'Process PDFs' to make them searchable")
+    print("• Then chat with your documents!")
     print("\nPress Ctrl+C to stop\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

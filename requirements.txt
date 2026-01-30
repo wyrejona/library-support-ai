@@ -1,27 +1,13 @@
-# Core FastAPI (you probably need these)
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
-
-# Database (required)
-sqlalchemy==2.0.23
-passlib[bcrypt]==1.7.4
-python-jose[cryptography]==3.3.0
-aiofiles==23.2.1
-itsdangerous==2.1.2
-
-# PDF Processing (required)
 pypdf==3.17.4
-
-# Utils (required)
-python-dotenv==1.0.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
-python-dateutil==2.8.2
-psutil==5.9.6
-
-# Vector Search (you already have sentence-transformers)
 numpy==1.26.4
+ollama==0.6.1
 
-# FAISS is optional but recommended
+# HuggingFace compatible versions
+huggingface-hub==0.19.4
+transformers==4.36.2
+
+# FAISS optional
 # faiss-cpu==1.7.4
