@@ -1,10 +1,29 @@
 import os
-from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
+from typing import List
 
-# Load variables from .env file
-load_dotenv()
+class Settings(BaseSettings):
+    # Server configuration
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
+    DEBUG: bool = False
+    
+    # Model configuration
+    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"  # Local embedding model
+    OLLAMA_MODEL: str = "llama2"  # or "mistral", "neural-chat", etc.
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    
+    # Vector store configuration
+    FAISS_INDEX_PATH: str = "app/data/library_index.faiss"
+    METADATA_PATH: str = "app/data/metadata.pkl"
+    
+    # File paths
+    PDFS_DIR: str = "pdfs"
+    
+    # CORS configuration
+    ALLOWED_ORIGINS: List[str] = ["*"]
+    
+    class Config:
+        env_file = ".env"
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY is missing from .env file")
+settings = Settings()

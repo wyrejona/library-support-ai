@@ -1,10 +1,19 @@
-fastapi
-uvicorn
-python-multipart
-python-dotenv
-# google-genai  <-- Removed
-ollama          # <-- New
-sentence-transformers # <-- New
-faiss-cpu
-pypdf
-numpy
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+sentence-transformers==2.2.2
+faiss-cpu==1.7.4
+pypdf==3.17.4
+ollama==0.1.11
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+numpy==1.24.3
+sqlalchemy==2.0.23
+alembic==1.12.1
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+itsdangerous==2.1.2
+python-dateutil==2.8.2

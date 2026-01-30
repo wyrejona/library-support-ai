@@ -1,41 +1,66 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.schemas import Query
-from app.ai.retrieval import retriever
-from app.ai.llm import ask_llm
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, RedirectResponse
+import uvicorn
+import os
 
-app = FastAPI(title="Library AI Backend")
+from app.config import settings
+from app.database import create_tables
+from app.middleware import AuthMiddleware
+from app.routes import auth, chat, upload, admin
 
+app = FastAPI(title="Library Chatbot Backend")
+
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict this to your WordPress domain in production
-    allow_methods=["POST"],
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Add authentication middleware
+app.add_middleware(AuthMiddleware)
+
+# Create database tables
+create_tables()
+
+# Include routers
+app.include_router(auth.router)
+app.include_router(chat.router)
+app.include_router(upload.router)
+app.include_router(admin.router)
+
+# Mount static files
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 @app.get("/")
-def health_check():
-    return {"status": "ok", "service": "Library AI Backend"}
+async def root():
+    return FileResponse("static/index.html")
 
-@app.post("/ask")
-def ask(query: Query):
-    question = query.query.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+@app.get("/login")
+async def login_page():
+    return FileResponse("templates/login.html")
 
-    # 1. Search directly using the retriever instance
-    # UPDATED: k=10 allows us to retrieve more pages, increasing the chance
-    # of finding specific examples alongside the general rules.
-    chunks = retriever.search(question, k=10)
-    
-    if not chunks:
-        return {"answer": "I could not find this information in the library materials."}
+@app.get("/dashboard")
+async def dashboard():
+    return FileResponse("templates/dashboard.html")
 
-    # 2. Prepare Context
-    # Add a separator so the LLM knows where one chunk ends and another begins
-    context_block = "\n\n---\n\n".join(chunks)
+@app.get("/chat")
+async def chat_page():
+    return FileResponse("templates/chat.html")
 
-    # 3. Generate Answer
-    answer = ask_llm(context=context_block, question=question)
-    
-    return {"answer": answer}
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "library-chatbot"}
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "app.main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG
+    )

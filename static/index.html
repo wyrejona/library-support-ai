@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Library AI Assistant</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <nav class="navbar">
+            <div class="nav-brand">
+                <i class="fas fa-book"></i>
+                <span>Library AI Assistant</span>
+            </div>
+            <div class="nav-links">
+                <a href="/dashboard" class="nav-link">Dashboard</a>
+                <a href="/chat" class="nav-link">Chat</a>
+                <div id="user-menu" style="display: none;">
+                    <span id="username"></span>
+                    <button onclick="logout()" class="btn btn-sm btn-outline">Logout</button>
+                </div>
+                <a href="/login" id="login-link" class="nav-link">Login</a>
+            </div>
+        </nav>
+
+        <main class="hero">
+            <div class="hero-content">
+                <h1>Welcome to Library AI Assistant</h1>
+                <p class="hero-subtitle">
+                    Upload your PDF documents and chat with an AI assistant that can answer questions based on your uploaded content.
+                </p>
+                <div class="hero-features">
+                    <div class="feature">
+                        <i class="fas fa-upload"></i>
+                        <h3>Upload PDFs</h3>
+                        <p>Upload your documents to create a knowledge base</p>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-comments"></i>
+                        <h3>Chat with Documents</h3>
+                        <p>Ask questions about your uploaded documents</p>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-shield-alt"></i>
+                        <h3>Secure & Private</h3>
+                        <p>All processing happens locally on your server</p>
+                    </div>
+                </div>
+                <div class="hero-actions">
+                    <a href="/login" class="btn btn-primary">Get Started</a>
+                    <a href="/chat" class="btn btn-secondary">Try Demo</a>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Check if user is logged in
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    const user = await response.json();
+                    document.getElementById('user-menu').style.display = 'flex';
+                    document.getElementById('username').textContent = user.username;
+                    document.getElementById('login-link').style.display = 'none';
+                }
+            } catch (error) {
+                console.log('Not logged in');
+            }
+        }
+
+        async function logout() {
+            await fetch('/api/auth/logout', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            window.location.href = '/';
+        }
+
+        checkAuth();
+    </script>
+</body>
+</html>

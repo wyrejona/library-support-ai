@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Library AI Assistant</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <nav class="navbar">
+            <div class="nav-brand">
+                <i class="fas fa-book"></i>
+                <span>Library AI Assistant</span>
+            </div>
+            <div class="nav-links">
+                <a href="/dashboard" class="nav-link active">
+                    <i class="fas fa-tachometer-alt"></i> Dashboard
+                </a>
+                <a href="/chat" class="nav-link">
+                    <i class="fas fa-comments"></i> Chat
+                </a>
+                <div class="user-menu">
+                    <span id="username"></span>
+                    <button onclick="logout()" class="btn btn-sm btn-outline">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <main class="dashboard">
+            <div class="dashboard-header">
+                <h1>Dashboard</h1>
+                <p>Manage your documents and view usage statistics</p>
+            </div>
+
+            <div class="dashboard-stats">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-file-pdf"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="file-count">0</h3>
+                        <p>Uploaded PDFs</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="storage-used">0 MB</h3>
+                        <p>Storage Used</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-comment-dots"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="query-count">0</h3>
+                        <p>Total Queries</p>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="index-status">Inactive</h3>
+                        <p>Vector Index</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dashboard-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-upload"></i> Upload PDF Documents</h2>
+                    </div>
+                    <div class="card-body">
+                        <form id="upload-form" class="upload-area">
+                            <div class="drop-zone" id="drop-zone">
+                                <i class="fas fa-cloud-upload-alt fa-3x"></i>
+                                <p>Drag & drop PDF files here or click to browse</p>
+                                <input type="file" id="file-input" accept=".pdf" multiple style="display: none;">
+                                <button type="button" class="btn btn-outline" onclick="document.getElementById('file-input').click()">
+                                    Browse Files
+                                </button>
+                            </div>
+                            <div id="file-list" class="file-list"></div>
+                            <button type="submit" class="btn btn-primary" id="upload-btn" disabled>
+                                <i class="fas fa-upload"></i> Upload Files
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-list"></i> Your Uploaded Files</h2>
+                        <button onclick="refreshFiles()" class="btn btn-sm">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="files-list" class="files-list">
+                            <p class="empty-state">No files uploaded yet</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-cogs"></i> Actions</h2>
+                    </div>
+                    <div class="card-body actions">
+                        <button onclick="createIndex()" class="btn btn-primary">
+                            <i class="fas fa-brain"></i> Create/Update Vector Index
+                        </button>
+                        <button onclick="window.location.href='/chat'" class="btn btn-secondary">
+                            <i class="fas fa-comments"></i> Go to Chat
+                        </button>
+                        <button onclick="viewQueryHistory()" class="btn btn-outline">
+                            <i class="fas fa-history"></i> View Query History
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        let user = null;
+        let selectedFiles = [];
+
+        // Check authentication and load user data
+        async function init() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    credentials: 'include'
+                });
+                if (!response.ok) {
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                user = await response.json();
+                document.getElementById('username').textContent = user.username;
+                
+                // Load dashboard data
+                loadStats();
+                loadFiles();
+                checkIndexStatus();
+                
+            } catch (error) {
+                window.location.href = '/login';
+            }
+        }
+
+        // Load dashboard statistics
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/upload/files', {
+                    credentials: 'include'
+                });
+                const files = await response.json();
+                
+                document.getElementById('file-count').textContent = files.length;
+                
+                // Calculate storage used
+                const storageUsed = files.reduce((sum, file) => sum + (file.file_size || 0), 0);
+                document.getElementById('storage-used').textContent = 
+                    `${(storageUsed / (1024 * 1024)).toFixed(2)} MB`;
+                
+                // Load query count
+                const historyRes = await fetch('/api/chat/history?limit=1', {
+                    credentials: 'include'
+                });
+                const history = await historyRes.json();
+                document.getElementById('query-count').textContent = history.length;
+                
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        // Load uploaded files
+        async function loadFiles() {
+            try {
+                const response = await fetch('/api/upload/files', {
+                    credentials: 'include'
+                });
+                const files = await response.json();
+                
+                const filesList = document.getElementById('files-list');
+                
+                if (files.length === 0) {
+                    filesList.innerHTML = '<p class="empty-state">No files uploaded yet</p>';
+                    return;
+                }
+                
+                filesList.innerHTML = `
+                    <table class="file-table">
+                        <thead>
+                            <tr>
+                                <th>Filename</th>
+                                <th>Size</th>
+                                <th>Uploaded</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${files.map(file => `
+                                <tr>
+                                    <td>
+                                        <i class="fas fa-file-pdf"></i>
+                                        ${file.original_filename}
+                                    </td>
+                                    <td>${formatFileSize(file.file_size)}</td>
+                                    <td>${new Date(file.uploaded_at).toLocaleDateString()}</td>
+                                    <td>
+                                        <span class="status-badge ${file.processed ? 'success' : 'warning'}">
+                                            ${file.processed ? 'Processed' : 'Pending'}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button onclick="deleteFile(${file.id})" class="btn btn-sm btn-danger">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                
+            } catch (error) {
+                console.error('Error loading files:', error);
+                showToast('Error loading files', 'error');
+            }
+        }
+
+        // File upload handling
+        document.getElementById('file-input').addEventListener('change', handleFileSelect);
+        document.getElementById('upload-form').addEventListener('submit', handleUpload);
+
+        // Drag and drop functionality
+        const dropZone = document.getElementById('drop-zone');
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        
+        dropZone.addEventListener('click', () => {
+            document.getElementById('file-input').click();
+        });
+
+        function handleFileSelect(e) {
+            handleFiles(e.target.files);
+        }
+
+        function handleFiles(files) {
+            selectedFiles = Array.from(files).filter(file => 
+                file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+            );
+            
+            updateFileList();
+        }
+
+        function updateFileList() {
+            const fileList = document.getElementById('file-list');
+            const uploadBtn = document.getElementById('upload-btn');
+            
+            if (selectedFiles.length === 0) {
+                fileList.innerHTML = '';
+                uploadBtn.disabled = true;
+                return;
+            }
+            
+            fileList.innerHTML = `
+                <h4>Selected Files (${selectedFiles.length})</h4>
+                <ul>
+                    ${selectedFiles.map(file => `
+                        <li>
+                            <i class="fas fa-file-pdf"></i>
+                            ${file.name} (${formatFileSize(file.size)})
+                        </li>
+                    `).join('')}
+                </ul>
+            `;
+            
+            uploadBtn.disabled = false;
+        }
+
+        async function handleUpload(e) {
+            e.preventDefault();
+            
+            if (selectedFiles.length === 0) return;
+            
+            const uploadBtn = document.getElementById('upload-btn');
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+            
+            try {
+                for (const file of selectedFiles) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    const response = await fetch('/api/upload/pdf', {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'include'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Failed to upload ${file.name}`);
+                    }
+                }
+                
+                showToast('Files uploaded successfully!', 'success');
+                selectedFiles = [];
+                updateFileList();
+                loadStats();
+                loadFiles();
+                
+            } catch (error) {
+                showToast('Upload failed: ' + error.message, 'error');
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Upload Files';
+            }
+        }
+
+        async function deleteFile(fileId) {
+            if (!confirm('Are you sure you want to delete this file?')) return;
+            
+            try {
+                const response = await fetch(`/api/upload/files/${fileId}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    showToast('File deleted successfully', 'success');
+                    loadStats();
+                    loadFiles();
+                } else {
+                    throw new Error('Failed to delete file');
+                }
+            } catch (error) {
+                showToast('Error deleting file', 'error');
+            }
+        }
+
+        async function createIndex() {
+            try {
+                const response = await fetch('/ingest', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast('Vector index created successfully!', 'success');
+                    checkIndexStatus();
+                } else {
+                    showToast('Error creating index: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showToast('Error creating index', 'error');
+            }
+        }
+
+        async function checkIndexStatus() {
+            try {
+                const response = await fetch('/health', {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                
+                const statusEl = document.getElementById('index-status');
+                if (data.vector_store_loaded) {
+                    statusEl.textContent = 'Active';
+                    statusEl.parentElement.parentElement.classList.add('active');
+                } else {
+                    statusEl.textContent = 'Inactive';
+                    statusEl.parentElement.parentElement.classList.remove('active');
+                }
+            } catch (error) {
+                console.error('Error checking index status:', error);
+            }
+        }
+
+        function viewQueryHistory() {
+            window.location.href = '/chat?view=history';
+        }
+
+        async function logout() {
+            await fetch('/api/auth/logout', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            window.location.href = '/';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="toast-content">
+                    <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                    <span>${message}</span>
+                </div>
+                <button onclick="this.parentElement.remove()" class="toast-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                if (toast.parentElement) {
+                    toast.remove();
+                }
+            }, 5000);
+        }
+
+        function refreshFiles() {
+            loadFiles();
+            showToast('Files list refreshed', 'info');
+        }
+
+        // Initialize dashboard
+        init();
+    </script>
+</body>
+</html>
