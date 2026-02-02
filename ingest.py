@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-Optimized PDF ingestion script for Library Support AI
-Uses Recursive Character Splitting for better LLM performance.
+Optimized PDF ingestion script for Library Support AI.
+Ensures the index is refreshed and only contains currently present PDFs.
 """
 import os
 import PyPDF2
+import shutil
 from typing import List, Dict, Any
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-def extract_text_from_pdf(pdf_path: str) -> List[Dict[ Any, Any]]:
+def extract_text_from_pdf(pdf_path: str) -> List[Dict[Any, Any]]:
     """Extract and split text into efficient semantic chunks"""
     text_chunks = []
     filename = os.path.basename(pdf_path)
     
-    # 600 characters is a "sweet spot" for local models on hardware like the OptiPlex 3040.
-    # It provides enough context without triggering timeouts.
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=600,
         chunk_overlap=60,
@@ -25,20 +24,15 @@ def extract_text_from_pdf(pdf_path: str) -> List[Dict[ Any, Any]]:
     try:
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
-            
             for page_num, page in enumerate(pdf_reader.pages, 1):
                 raw_text = page.extract_text()
                 if not raw_text or not raw_text.strip():
                     continue
 
-                # Basic cleaning: remove extra whitespace
                 clean_text = " ".join(raw_text.split())
-                
-                # Split page text into manageable chunks
                 page_chunks = text_splitter.split_text(clean_text)
                 
                 for chunk in page_chunks:
-                    # Filter out uselessly small fragments (e.g., just a page number)
                     if len(chunk.strip()) > 60:
                         text_chunks.append({
                             'content': chunk.strip(),
@@ -47,7 +41,6 @@ def extract_text_from_pdf(pdf_path: str) -> List[Dict[ Any, Any]]:
                         })
         
         print(f"  ✅ Extracted {len(text_chunks)} optimized chunks from {filename}")
-        
     except Exception as e:
         print(f"  ❌ Error reading {pdf_path}: {str(e)}")
     
@@ -55,25 +48,39 @@ def extract_text_from_pdf(pdf_path: str) -> List[Dict[ Any, Any]]:
 
 def main():
     print("=" * 50)
-    print("📄 Optimized PDF Ingestion Script")
+    print("🔄 Refreshing PDF Ingestion Index")
     print("=" * 50)
     
     pdfs_dir = "pdfs"
+    data_dir = "data"
+    
+    # --- OPTIMIZATION STEP: CLEAR OLD INDEX DATA ---
+    # This ensures that if a PDF was deleted from the folder, 
+    # its data is also removed from the AI's memory.
+    if os.path.exists(data_dir):
+        print("🧹 Cleaning old index files to ensure a fresh sync...")
+        for file in os.listdir(data_dir):
+            file_path = os.path.join(data_dir, file)
+            try:
+                if os.path.isfile(file_path):
+                    os.unlink(file_path)
+            except Exception as e:
+                print(f"  ⚠️ Warning: Could not delete {file_path}: {e}")
+    else:
+        os.makedirs(data_dir)
+
     if not os.path.exists(pdfs_dir):
         os.makedirs(pdfs_dir)
-        print(f"📁 Created '{pdfs_dir}' directory. Place your PDFs there and re-run.")
+        print(f"📁 Created '{pdfs_dir}' directory.")
         return
     
     pdf_files = [f for f in os.listdir(pdfs_dir) if f.lower().endswith('.pdf')]
     
     if not pdf_files:
-        print("❌ No PDF files found in 'pdfs/' directory.")
+        print("❌ No PDF files found in 'pdfs/' directory. Index cleared.")
         return
     
-    print(f"Found {len(pdf_files)} PDF file(s):")
-    for pdf in pdf_files:
-        print(f"  • {pdf}")
-    
+    print(f"Found {len(pdf_files)} PDF file(s) for indexing:")
     all_chunks = []
     for pdf_file in pdf_files:
         pdf_path = os.path.join(pdfs_dir, pdf_file)
@@ -84,26 +91,21 @@ def main():
         print("❌ No text could be extracted.")
         return
     
-    print(f"\n📊 Total chunks to index: {len(all_chunks)}")
-    
-    # Create vector index
+    # --- CREATE NEW VECTOR INDEX ---
     try:
         from app.utils import VectorStore
         
         texts = [chunk['content'] for chunk in all_chunks]
-        # Passing full chunk dicts as metadata
         metadata = all_chunks
         
-        print("🧠 Generating embeddings and saving index...")
+        print(f"\n🧠 Generating fresh embeddings for {len(all_chunks)} chunks...")
         vector_store = VectorStore()
         vector_store.create_index(texts, metadata)
         
-        print(f"\n🎉 Ingestion complete!")
-        print(f"  Index saved to: data/metadata.pkl (and your vector store path)")
+        print(f"\n🎉 Ingestion complete! The AI is now synced with your pdfs/ folder.")
         
     except Exception as e:
         print(f"\n❌ Error creating index: {e}")
-        print("  Ensure dependencies are installed: pip install sentence-transformers faiss-cpu")
 
 if __name__ == "__main__":
     main()

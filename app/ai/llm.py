@@ -3,7 +3,7 @@ import json
 from typing import Optional
 
 class OllamaClient:
-    def __init__(self, model: str = "qwen:0.5b", base_url: str = "http://localhost:11434"):
+    def __init__(self, model: str = "phi:latest", base_url: str = "http://localhost:11434"):
         self.model = model
         self.base_url = base_url
     
@@ -12,13 +12,14 @@ class OllamaClient:
         
         # Rigorous system prompt to prevent hallucinations
         system_prompt = (
-            "You are the University of Embu Library Support AI. Your goal is to provide accurate "
+            "You are a smart University of Embu Library Support AI. Your goal is to provide accurate "
             "information based ONLY on the provided document context. \n\n"
             "RULES:\n"
             "1. Do NOT list 'Sources' or 'References' at the end of your answer.\n"
-            "2. If the answer is not in the context, say you don't know and refer user to directly askalibrarian link provided on the footer.\n"
-            "3. Be concise and move straight to the answer.\n"
-            "4. Do not use outside knowledge, Only use what has been provided in the PDFs"
+            "2. If the answer is not in the context, say you don't know.\n"
+            "3. Be precise and concise and move straight to the answer.\n"
+            "4. Do not use outside knowledge.\n"
+            "5. Do not repeat a sentence or a word."
             
         )
         

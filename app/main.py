@@ -1,21 +1,43 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.templating import Jinja2Templates
 import os
 import shutil
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 import uvicorn
-import requests
+from pathlib import Path
+import sys
+
+# Add the app directory to Python path
+current_file = Path(__file__).resolve()
+app_dir = current_file.parent
+project_root = app_dir.parent
+
+sys.path.insert(0, str(app_dir))
+sys.path.insert(0, str(project_root))
 
 # Import our custom modules
-from app.utils import VectorStore
-from app.ai.llm import OllamaClient
+try:
+    # First try: if running from project root
+    from app.utils import VectorStore
+    from app.ai.llm import OllamaClient
+except ImportError:
+    try:
+        # Second try: if running from app directory
+        from utils import VectorStore
+        from ai.llm import OllamaClient
+    except ImportError:
+        # Third try: relative import
+        from .utils import VectorStore
+        from .ai.llm import OllamaClient
 
 # Initialize components
 vector_store = VectorStore()
-llm_client = OllamaClient()
+# Configured for your verified qwen:0.5b model on OptiPlex 3040
+llm_client = OllamaClient(model="qwen:0.5b")
 
 app = FastAPI(title="Library Support AI")
 
@@ -28,12 +50,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create necessary project directories
-os.makedirs("pdfs", exist_ok=True)
-os.makedirs("data", exist_ok=True)
-os.makedirs("static", exist_ok=True)
+# Get the current directory
+current_dir = Path(__file__).parent
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Create necessary project directories
+pdfs_dir = current_dir.parent / "pdfs"
+data_dir = current_dir.parent / "data"
+os.makedirs(pdfs_dir, exist_ok=True)
+os.makedirs(data_dir, exist_ok=True)
+
+# Configure templates - they are in app/templates
+templates = Jinja2Templates(directory=str(current_dir / "templates"))
+
+def format_file_size(bytes):
+    """Format file size in human readable format"""
+    if bytes == 0:
+        return "0 Bytes"
+    size_names = ["Bytes", "KB", "MB", "GB", "TB"]
+    i = 0
+    while bytes >= 1024 and i < len(size_names) - 1:
+        bytes /= 1024.0
+        i += 1
+    return f"{bytes:.2f} {size_names[i]}"
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -42,112 +80,251 @@ async def home():
     <html lang="en">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Library Support AI</title>
         <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
+            :root {
+                --primary: #1a73e8;
+                --primary-dark: #0d47a1;
+                --secondary: #5f6368;
+                --success: #34a853;
+                --danger: #d93025;
+                --warning: #f9ab00;
+                --light: #f8f9fa;
+                --dark: #202124;
+                --gray: #dadce0;
+                --gray-light: #f1f3f4;
+                --shadow: 0 4px 12px rgba(0,0,0,0.1);
+                --radius: 12px;
+                --radius-sm: 8px;
+                --transition: all 0.3s ease;
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
             body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: #f0f2f5;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                min-height: 100vh;
+                color: var(--dark);
+                line-height: 1.6;
+            }
+
+            .container {
+                max-width: 1400px;
+                margin: 0 auto;
+                padding: 20px;
                 height: 100vh;
                 display: flex;
                 flex-direction: column;
+                gap: 20px;
             }
-            .container {
-                max-width: 1000px;
-                margin: 20px auto;
-                background: white;
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                border-radius: 12px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-                overflow: hidden;
-            }
+
             header {
-                padding: 20px;
-                background: #1a73e8;
-                color: white;
-                text-align: center;
-            }
-            .main-layout {
-                display: grid;
-                grid-template-columns: 300px 1fr;
-                flex: 1;
-                overflow: hidden;
-            }
-            .sidebar {
-                border-right: 1px solid #ddd;
-                padding: 20px;
-                background: #fafafa;
-                overflow-y: auto;
-            }
-            .chat-area {
-                display: flex;
-                flex-direction: column;
-                padding: 20px;
                 background: white;
-                height: 100%;
-            }
-            #chatMessages {
-                flex: 1;
-                overflow-y: auto;
-                padding: 15px;
-                margin-bottom: 10px;
-                border: 1px solid #eee;
-                border-radius: 8px;
+                border-radius: var(--radius);
+                padding: 20px 30px;
+                box-shadow: var(--shadow);
                 display: flex;
-                flex-direction: column;
-                background: #fff;
+                justify-content: space-between;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 15px;
             }
-            .message {
+
+            .logo {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }
+
+            .logo i {
+                font-size: 2.5rem;
+                color: var(--primary);
+                background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+
+            .logo h1 {
+                font-size: 1.8rem;
+                font-weight: 700;
+                color: var(--dark);
+            }
+
+            .nav-links {
+                display: flex;
+                gap: 15px;
+            }
+
+            .nav-link {
+                padding: 10px 20px;
+                text-decoration: none;
+                color: var(--dark);
+                border-radius: var(--radius-sm);
+                transition: var(--transition);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-weight: 600;
+            }
+
+            .nav-link:hover {
+                background: var(--gray-light);
+                color: var(--primary);
+            }
+
+            .nav-link.active {
+                background: var(--primary);
+                color: white;
+            }
+
+            .status-indicator {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 8px 16px;
+                background: var(--gray-light);
+                border-radius: 20px;
+                font-size: 0.9rem;
+            }
+
+            .status-dot {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                background: var(--success);
+                animation: pulse 2s infinite;
+            }
+
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+            }
+
+            .welcome-message {
+                background: white;
+                border-radius: var(--radius);
+                padding: 40px;
+                text-align: center;
+                box-shadow: var(--shadow);
+                margin-top: 20px;
+            }
+
+            .welcome-message h2 {
+                margin-bottom: 20px;
+                color: var(--primary);
+            }
+
+            .features {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 20px;
+                margin-top: 30px;
+            }
+
+            .feature {
+                padding: 25px;
+                background: var(--gray-light);
+                border-radius: var(--radius);
+                text-align: center;
+                transition: var(--transition);
+            }
+
+            .feature:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            }
+
+            .feature i {
+                font-size: 2.5rem;
+                color: var(--primary);
                 margin-bottom: 15px;
-                padding: 12px 16px;
-                border-radius: 12px;
-                line-height: 1.5;
-                max-width: 85%;
-                word-wrap: break-word;
-                white-space: pre-wrap; /* Ensures formatting and spacing stay intact */
-                height: auto;
-                display: block;
             }
-            .bot-message { background: #f1f3f4; align-self: flex-start; color: #333; }
-            .user-message { background: #d2e3fc; align-self: flex-end; margin-left: auto; color: #1a73e8; }
-            
-            .input-group { display: flex; gap: 10px; padding-top: 10px; }
-            textarea {
-                flex: 1;
-                padding: 12px;
-                border: 1px solid #ccc;
-                border-radius: 8px;
-                resize: none;
-                font-family: inherit;
+
+            .quick-actions {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+                margin-top: 30px;
             }
+
             .btn {
-                padding: 10px 15px;
+                padding: 12px 24px;
                 border: none;
-                border-radius: 6px;
+                border-radius: var(--radius-sm);
+                font-weight: 600;
+                font-size: 0.95rem;
                 cursor: pointer;
-                font-weight: bold;
-                transition: 0.2s;
-                display: flex;
+                transition: var(--transition);
+                display: inline-flex;
                 align-items: center;
                 justify-content: center;
+                gap: 8px;
+                text-decoration: none;
             }
-            .btn-primary { background: #1a73e8; color: white; }
-            .btn-secondary { background: #5f6368; color: white; width: 100%; margin-top: 10px; }
-            .btn-danger { background: #d93025; color: white; padding: 5px 8px; font-size: 0.8em; }
-            
-            .status { font-size: 0.8em; margin-top: 10px; color: #666; }
-            .file-item { 
-                font-size: 0.85em; 
-                margin-bottom: 8px; 
-                padding: 8px; 
-                background: #fff; 
-                border: 1px solid #ddd;
-                border-radius: 6px; 
-                display: flex; 
-                justify-content: space-between; 
-                align-items: center;
+
+            .btn i {
+                font-size: 1.1rem;
+            }
+
+            .btn-primary {
+                background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+                color: white;
+            }
+
+            .btn-primary:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 12px rgba(26, 115, 232, 0.2);
+            }
+
+            .btn-success {
+                background: linear-gradient(135deg, var(--success), #2e7d32);
+                color: white;
+            }
+
+            .btn-success:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 12px rgba(52, 168, 83, 0.2);
+            }
+
+            @media (max-width: 768px) {
+                .container {
+                    padding: 10px;
+                    height: auto;
+                    min-height: 100vh;
+                }
+                
+                header {
+                    flex-direction: column;
+                    text-align: center;
+                    gap: 15px;
+                }
+                
+                .nav-links {
+                    flex-wrap: wrap;
+                    justify-content: center;
+                }
+                
+                .features {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            @media (max-width: 480px) {
+                .btn {
+                    padding: 10px 16px;
+                    font-size: 0.9rem;
+                }
+                
+                .nav-link {
+                    padding: 8px 12px;
+                    font-size: 0.9rem;
+                }
             }
         </style>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -155,183 +332,231 @@ async def home():
     <body>
         <div class="container">
             <header>
-                <h1><i class="fas fa-university"></i> Library Support AI</h1>
-            </header>
-            <div class="main-layout">
-                <div class="sidebar">
-                    <h3><i class="fas fa-file-pdf"></i> Documents</h3>
-                    <input type="file" id="fileInput" multiple accept=".pdf" style="display:none" onchange="uploadFiles(this.files)">
-                    <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">
-                        <i class="fas fa-upload" style="margin-right:8px"></i> Upload PDFs
-                    </button>
-                    <button class="btn btn-secondary" style="background:#34a853" onclick="processPDFs()">
-                        <i class="fas fa-brain" style="margin-right:8px"></i> Process Docs
-                    </button>
-                    <div id="fileList" style="margin-top:20px"></div>
-                    <div id="statusBox" class="status"></div>
+                <div class="logo">
+                    <i class="fas fa-brain"></i>
+                    <h1>Library Support AI</h1>
                 </div>
-                <div class="chat-area">
-                    <div id="chatMessages">
-                        <div class="message bot-message">Welcome, I am your Library AI buddy. Ask me anything about your uploaded documents!</div>
+                
+                <div class="nav-links">
+                    <a href="/" class="nav-link active">
+                        <i class="fas fa-home"></i> Home
+                    </a>
+                    <a href="/files" class="nav-link">
+                        <i class="fas fa-folder"></i> Manage Files
+                    </a>
+                    <a href="/chat" class="nav-link">
+                        <i class="fas fa-comments"></i> Chat
+                    </a>
+                </div>
+                
+                <div class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span>System Ready</span>
+                </div>
+            </header>
+
+            <div class="welcome-message">
+                <h2>Welcome to Library Support AI</h2>
+                <p>Your intelligent assistant for managing and querying library documents. Upload PDFs, ask questions, and get instant answers from your documents.</p>
+                
+                <div class="features">
+                    <div class="feature">
+                        <i class="fas fa-file-upload"></i>
+                        <h3>Upload PDFs</h3>
+                        <p>Easily upload multiple PDF documents</p>
                     </div>
-                    <div class="input-group">
-                        <textarea id="userInput" placeholder="Ask about library resources..." rows="2"></textarea>
-                        <button class="btn btn-primary" onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
+                    <div class="feature">
+                        <i class="fas fa-robot"></i>
+                        <h3>AI-Powered Chat</h3>
+                        <p>Ask questions about your documents</p>
                     </div>
+                    <div class="feature">
+                        <i class="fas fa-search"></i>
+                        <h3>Smart Search</h3>
+                        <p>Find information quickly and accurately</p>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-download"></i>
+                        <h3>Easy Download</h3>
+                        <p>Preview and download your files</p>
+                    </div>
+                </div>
+                
+                <div class="quick-actions">
+                    <a href="/files" class="btn btn-primary">
+                        <i class="fas fa-upload"></i> Upload Files
+                    </a>
+                    <a href="/chat" class="btn btn-success">
+                        <i class="fas fa-comment"></i> Start Chatting
+                    </a>
                 </div>
             </div>
         </div>
-
-        <script>
-            async function uploadFiles(files) {
-                const formData = new FormData();
-                for (let f of files) formData.append('files', f);
-                document.getElementById('statusBox').innerText = "Uploading...";
-                const resp = await fetch('/upload', { method: 'POST', body: formData });
-                if (resp.ok) {
-                    document.getElementById('statusBox').innerText = "Upload complete.";
-                    loadFiles();
-                }
-            }
-
-            async function loadFiles() {
-                const resp = await fetch('/files');
-                const data = await resp.json();
-                const list = document.getElementById('fileList');
-                list.innerHTML = data.files.map(f => `
-                    <div class="file-item">
-                        <span title="${f.name}">${f.name.length > 20 ? f.name.substring(0,20)+'...' : f.name}</span>
-                        <button class="btn btn-danger" onclick="deleteFile('${f.name}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                `).join('');
-            }
-
-            async function deleteFile(filename) {
-                if(!confirm(`Delete ${filename}?`)) return;
-                const resp = await fetch(`/files/${filename}`, { method: 'DELETE' });
-                if (resp.ok) {
-                    loadFiles();
-                    document.getElementById('statusBox').innerText = "File deleted.";
-                }
-            }
-
-            async function processPDFs() {
-                document.getElementById('statusBox').innerText = "Indexing (this takes a moment)...";
-                const resp = await fetch('/ingest', { method: 'POST' });
-                const data = await resp.json();
-                document.getElementById('statusBox').innerText = data.success ? "Ready for chat!" : "Error indexing.";
-            }
-
-            async function sendMessage() {
-                const input = document.getElementById('userInput');
-                const msg = input.value.trim();
-                if (!msg) return;
-
-                addMessage("You: " + msg, 'user');
-                input.value = '';
-
-                try {
-                    const resp = await fetch('/chat', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ message: msg })
-                    });
-                    const data = await resp.json();
-                    addMessage("AI Assistant: " + data.response, 'bot');
-                } catch (e) {
-                    addMessage("AI Assistant: Error connecting to server.", 'bot');
-                }
-            }
-
-            function addMessage(text, type) {
-                const div = document.createElement('div');
-                div.className = `message ${type}-message`;
-                div.innerText = text;
-                const container = document.getElementById('chatMessages');
-                container.appendChild(div);
-                container.scrollTop = container.scrollHeight;
-            }
-            
-            loadFiles();
-        </script>
     </body>
     </html>
     """
 
+# File Management Page - GET request returns HTML
+@app.get("/files", response_class=HTMLResponse)
+async def manage_files(request: Request):
+    # Get list of files
+    files = []
+    for f in os.listdir(pdfs_dir):
+        if f.endswith(".pdf"):
+            file_path = pdfs_dir / f
+            files.append({
+                "name": f,
+                "size": os.path.getsize(file_path),
+                "modified": datetime.fromtimestamp(os.path.getmtime(file_path)),
+                "formatted_size": format_file_size(os.path.getsize(file_path))
+            })
+    
+    # Sort files by modification time (newest first)
+    files.sort(key=lambda x: x["modified"], reverse=True)
+    
+    # Get vector store status
+    vector_status = "Not processed"
+    if os.path.exists(data_dir / "chroma.sqlite3"):
+        vector_status = "Ready"
+    
+    total_size = sum(f["size"] for f in files)
+    
+    return templates.TemplateResponse("files.html", {
+        "request": request,
+        "files": files,
+        "total_files": len(files),
+        "total_size": total_size,
+        "format_file_size": format_file_size,
+        "vector_status": vector_status
+    })
+
+# Chat Page - GET request returns HTML (SEPARATE FROM POST!)
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    # Get list of files
+    files = []
+    for f in os.listdir(pdfs_dir):
+        if f.endswith(".pdf"):
+            file_path = pdfs_dir / f
+            files.append({
+                "name": f,
+                "size": os.path.getsize(file_path),
+                "formatted_size": format_file_size(os.path.getsize(file_path))
+            })
+    
+    return templates.TemplateResponse("chat.html", {
+        "request": request,
+        "files": files,
+        "total_files": len(files)
+    })
+
+# Chat API - POST request returns JSON (SEPARATE FROM GET!)
+@app.post("/chat")
+async def chat_api(request_data: dict):
+    user_message = request_data.get("message") or request_data.get("query") or ""
+    if not user_message:
+        return {"response": "Please enter a question."}
+    
+    try:
+        # Search for relevant context
+        search_results = vector_store.search(user_message, k=2)
+        from utils import format_context
+        context = format_context(search_results)
+        
+        # Generate response using LLM
+        response = llm_client.generate_response(prompt=user_message, context=context)
+        
+        return {
+            "response": response,
+            "answer": response,
+            "context_used": len(context) > 0
+        }
+    except Exception as e:
+        return {
+            "response": f"I apologize, but I encountered an error: {str(e)}",
+            "error": str(e)
+        }
+
 @app.post("/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
-    saved_count = 0
+    uploaded_files = []
+    
     for file in files:
         if file.filename.lower().endswith('.pdf'):
-            filepath = os.path.join("pdfs", file.filename)
-            with open(filepath, "wb") as buffer:
+            file_path = pdfs_dir / file.filename
+            with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            saved_count += 1
-    return {"count": saved_count}
+            file_size = os.path.getsize(file_path)
+            uploaded_files.append({
+                "name": file.filename,
+                "size": file_size,
+                "uploaded_at": datetime.now().isoformat()
+            })
+    return {"status": "success", "uploaded": uploaded_files}
 
-@app.get("/files")
-async def list_files():
-    files = [{"name": f} for f in os.listdir("pdfs") if f.endswith(".pdf")]
+@app.get("/api/files")
+async def list_files_api():
+    files = []
+    for f in os.listdir(pdfs_dir):
+        if f.endswith(".pdf"):
+            file_path = pdfs_dir / f
+            files.append({
+                "name": f,
+                "size": os.path.getsize(file_path),
+                "modified": datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat()
+            })
     return {"files": files}
+
+@app.get("/download/{filename}")
+async def download_file(filename: str):
+    filepath = pdfs_dir / filename
+    if os.path.exists(filepath):
+        return FileResponse(
+            path=filepath,
+            filename=filename,
+            media_type='application/pdf',
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    raise HTTPException(status_code=404, detail="File not found")
 
 @app.delete("/files/{filename}")
 async def delete_file(filename: str):
-    filepath = os.path.join("pdfs", filename)
-    if os.path.exists(filepath):
-        os.remove(filepath)
-        return {"message": "Deleted"}
+    path = pdfs_dir / filename
+    if os.path.exists(path):
+        os.remove(path)
+        return {"status": "deleted", "filename": filename}
     raise HTTPException(status_code=404, detail="File not found")
+
+@app.delete("/clear-all-files")
+async def clear_all_files():
+    try:
+        # Remove all PDF files
+        for filename in os.listdir(pdfs_dir):
+            if filename.endswith(".pdf"):
+                os.remove(pdfs_dir / filename)
+        
+        # Optionally clear vector store data
+        if os.path.exists(data_dir):
+            shutil.rmtree(data_dir)
+            os.makedirs(data_dir, exist_ok=True)
+        
+        return {"status": "success", "message": "All files cleared"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ingest")
 async def ingest_pdfs():
+    import subprocess
     try:
-        import subprocess
-        result = subprocess.run(["python3", "ingest.py"], capture_output=True, text=True)
-        return {"success": result.returncode == 0, "output": result.stdout}
+        # Run ingest.py from the parent directory
+        ingest_script = project_root / "ingest.py"
+        result = subprocess.run(["python3", str(ingest_script)], capture_output=True, text=True)
+        if result.returncode == 0:
+            return {"success": True, "message": "PDFs processed successfully"}
+        else:
+            return {"success": False, "error": result.stderr}
     except Exception as e:
         return {"success": False, "error": str(e)}
-
-@app.post("/chat")
-@app.post("/ask")
-async def chat(request_data: dict):
-    # Support both "message" (internal UI) and "query" (WordPress plugin)
-    user_message = request_data.get("message") or request_data.get("query") or ""
-    
-    if not user_message:
-        return {"response": "I didn't receive a question.", "answer": "I didn't receive a question."}
-
-    # RAG Retrieval
-    search_results = vector_store.search(user_message, k=3)
-    
-    from app.utils import format_context
-    context = format_context(search_results)
-    
-    # Call Ollama
-    response = llm_client.generate_response(prompt=user_message, context=context)
-    
-    # Return keys compatible with all frontends
-    return {
-        "response": response,
-        "answer": response,
-        "sources": [{"file": r['source'], "page": r.get('page')} for r in search_results]
-    }
-
-@app.get("/health")
-async def health_check():
-    ollama_ok = False
-    try:
-        r = requests.get("http://localhost:11434/api/tags", timeout=2)
-        ollama_ok = r.status_code == 200
-    except:
-        pass
-    
-    return {
-        "ollama": "up" if ollama_ok else "down",
-        "index_ready": os.path.exists("data/metadata.pkl"),
-        "pdf_count": len(os.listdir("pdfs"))
-    }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
