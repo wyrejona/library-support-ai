@@ -1,0 +1,45 @@
+{
+  "expected_responses": {
+    "borrowing": {
+      "query": "How many books can part-time lecturers borrow?",
+      "expected_keywords": ["10 books", "30 days", "part-time", "lecturer", "borrow", "loan period"],
+      "expected_answer": "Part-time lecturers can borrow up to 10 books for 30 days (similar to full-time lecturers)."
+    },
+    "circulation": {
+      "query": "What are the circulation desk services and operating hours?",
+      "expected_keywords": ["circulation desk", "services", "borrowing", "returns", "renewals", "fines", "8am", "5pm", "weekdays"],
+      "expected_answer": "Circulation desk services include book borrowing, returns, renewals, and fine payments. Operating hours are typically Monday-Friday 8am-5pm."
+    },
+    "hours": {
+      "query": "What are the library opening hours?",
+      "expected_keywords": ["opening hours", "8am", "9pm", "Monday", "Friday", "Saturday", "Sunday", "closed"],
+      "expected_answer": "Library opening hours are Monday-Friday 8am-9pm, Saturday 9am-5pm, Sunday closed."
+    },
+    "exams": {
+      "query": "How do I access past exam papers?",
+      "expected_keywords": ["past exam", "exam papers", "MyLOFT", "login", "student credentials", "portal"],
+      "expected_answer": "Access past exam papers through MyLOFT portal using student credentials."
+    },
+    "plagiarism": {
+      "query": "What is plagiarism according to university policy?",
+      "expected_keywords": ["plagiarism", "academic dishonesty", "copying", "citation", "Turnitin", "penalty"],
+      "expected_answer": "Plagiarism is using someone else's work without proper citation. It's a serious academic offense with penalties."
+    },
+    "fines": {
+      "query": "What are the fines for overdue books?",
+      "expected_keywords": ["fines", "overdue", "per day", "Ksh", "charges", "late"],
+      "expected_answer": "Overdue fines are typically Ksh 10-20 per day per book."
+    },
+    "renewal": {
+      "query": "How do I renew borrowed books?",
+      "conversation_id": "test_renewal",
+      "expected_keywords": ["renew", "online", "library account", "circulation desk", "before due date"],
+      "expected_answer": "Renew books online through library account or at circulation desk before due date."
+    },
+    "eresources": {
+      "query": "How do I access e-resources?",
+      "expected_keywords": ["e-resources", "MyLOFT", "login", "databases", "electronic", "online"],
+      "expected_answer": "Access e-resources through MyLOFT portal or library website using university credentials."
+    }
+  }
+}

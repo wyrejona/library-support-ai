@@ -1,85 +1,88 @@
+#!/usr/bin/env python3
+"""
+Debug script to test the chat pipeline.
+"""
 import sys
 import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Set up path
-project_root = os.path.dirname(os.path.abspath(__file__))
-app_dir = os.path.join(project_root, 'app')
-sys.path.insert(0, project_root)
-sys.path.insert(0, app_dir)
+from app.config import config
+from app.utils import VectorStore, format_context
+from app.ai.llm import OllamaClient
 
-from app.main import app
+print("🔍 Debugging Chat Pipeline")
+print("=" * 60)
 
-print("=== Debugging /chat endpoint ===")
-print()
+# 1. Test Vector Store
+print("1. Testing Vector Store...")
+vector_store = VectorStore()
+vector_store.load()
 
-# Find all /chat routes
-chat_routes = []
-for route in app.routes:
-    if '/chat' in route.path:
-        chat_routes.append(route)
+if not vector_store.loaded:
+    print("❌ Vector store not loaded")
+    sys.exit(1)
 
-if len(chat_routes) == 0:
-    print("❌ No /chat routes found!")
-elif len(chat_routes) == 1:
-    route = chat_routes[0]
-    methods = ', '.join(sorted(route.methods)) if hasattr(route, 'methods') else 'GET,HEAD'
-    print(f"✅ Found 1 /chat route:")
-    print(f"   Path: {route.path}")
-    print(f"   Methods: {methods}")
-    print(f"   Endpoint: {route.endpoint.__name__ if hasattr(route, 'endpoint') else 'N/A'}")
-    
-    # Check if it's the right endpoint
-    endpoint = route.endpoint
-    if hasattr(endpoint, '__name__'):
-        if endpoint.__name__ == 'chat_page':
-            print("   ✅ Endpoint is 'chat_page' (should handle GET)")
-        elif endpoint.__name__ == 'chat_api':
-            print("   ❌ Endpoint is 'chat_api' (should be for POST only)")
-        else:
-            print(f"   ⚠ Endpoint name: {endpoint.__name__}")
-else:
-    print(f"✅ Found {len(chat_routes)} /chat routes:")
-    for i, route in enumerate(chat_routes, 1):
-        methods = ', '.join(sorted(route.methods)) if hasattr(route, 'methods') else 'GET,HEAD'
-        endpoint_name = route.endpoint.__name__ if hasattr(route.endpoint, '__name__') else 'N/A'
-        print(f"  {i}. Path: {route.path}")
-        print(f"     Methods: {methods}")
-        print(f"     Endpoint: {endpoint_name}")
+print(f"✅ Vector store loaded with {len(vector_store.chunks)} chunks")
 
-print()
-print("=== Testing import ===")
+# 2. Test search for "What is MyLOFT?"
+query = "What is MyLOFT?"
+print(f"\n2. Searching for: '{query}'")
+search_results = vector_store.search(query, k=5)
+
+if not search_results:
+    print("❌ No search results found!")
+    sys.exit(1)
+
+print(f"✅ Found {len(search_results)} results")
+for i, result in enumerate(search_results[:3]):
+    print(f"   Result {i+1}: Score={result['score']:.3f}")
+    preview = result['content'][:100].replace('\n', ' ')
+    print(f"      Preview: {preview}...")
+
+# 3. Test context formatting
+print(f"\n3. Testing context formatting...")
+context = format_context(search_results)
+print(f"✅ Context length: {len(context)} characters")
+print(f"\n📝 First 500 chars of context:")
+print("-" * 50)
+print(context[:500])
+print("-" * 50)
+
+# 4. Test LLM response
+print(f"\n4. Testing LLM response...")
+llm_client = OllamaClient()
+
+# Check if Ollama is running
+print(f"   Using model: {llm_client.model}")
+print(f"   Ollama base URL: {llm_client.base_url}")
+
 try:
-    from app.main import app
-    print("✅ Successfully imported app")
-    
-    # Check if chat_page function exists
-    from app.main import chat_page
-    print("✅ chat_page function exists")
-except ImportError as e:
-    print(f"❌ Import error: {e}")
-except AttributeError as e:
-    print(f"❌ Attribute error: {e}")
-
-print()
-print("=== Quick test with test client ===")
-try:
-    from fastapi.testclient import TestClient
-    client = TestClient(app)
-    
-    # Test GET
-    response = client.get("/chat")
-    print(f"GET /chat status: {response.status_code}")
+    # Test connection
+    import requests
+    response = requests.get(f"{llm_client.base_url}/api/tags", timeout=5)
     if response.status_code == 200:
-        print("✅ GET /chat works!")
-    elif response.status_code == 405:
-        print("❌ GET /chat returns 405 - Method Not Allowed")
-        print("   This means the route exists but doesn't accept GET method")
-    
-    # Test POST
-    response = client.post("/chat", json={"message": "test"})
-    print(f"POST /chat status: {response.status_code}")
-    if response.status_code == 200:
-        print("✅ POST /chat works!")
-    
+        print("✅ Ollama is running")
+    else:
+        print(f"❌ Ollama returned status {response.status_code}")
+        sys.exit(1)
 except Exception as e:
-    print(f"❌ Test client error: {e}")
+    print(f"❌ Cannot connect to Ollama: {e}")
+    sys.exit(1)
+
+# Test generate_response with context
+print(f"\n5. Testing generate_response with context...")
+response = llm_client.generate_response(prompt=query, context=context)
+print(f"✅ Response received ({len(response)} chars):")
+print("=" * 60)
+print(response)
+print("=" * 60)
+
+# 6. Test without context
+print(f"\n6. Testing generate_response WITHOUT context...")
+response_no_context = llm_client.generate_response(prompt=query, context="")
+print(f"Response without context:")
+print("=" * 60)
+print(response_no_context)
+print("=" * 60)
+
+print("\n✅ Debug complete!")

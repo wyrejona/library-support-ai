@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Library Support AI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* Base Variables & Reset */
+        :root {
+            --primary: #1a73e8; --primary-dark: #0d47a1;
+            --secondary: #5f6368; --success: #34a853;
+            --danger: #d93025; --warning: #f9ab00;
+            --light: #f8f9fa; --dark: #202124;
+            --gray: #dadce0; --gray-light: #f1f3f4;
+            --shadow: 0 4px 12px rgba(0,0,0,0.1);
+            --radius: 12px;
+        }
+        body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; color: var(--dark); }
+        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; display: flex; flex-direction: column; gap: 30px; }
+
+        /* Header */
+        header { background: white; padding: 20px 40px; border-radius: var(--radius); box-shadow: var(--shadow); display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 15px; font-size: 1.5rem; font-weight: bold; }
+        .logo i { color: var(--primary); font-size: 2rem; }
+
+        /* Model Selector */
+        .model-selector { display: flex; gap: 15px; align-items: center; }
+        select { padding: 8px; border-radius: 6px; border: 1px solid var(--gray); }
+        .btn-apply { background: var(--primary); color: white; border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; }
+        .btn-apply:disabled { background: var(--gray); cursor: not-allowed; }
+
+        /* Action Box (Re-Build) */
+        .action-box { background: white; padding: 30px; border-radius: var(--radius); box-shadow: var(--shadow); border-left: 5px solid var(--warning); display: flex; justify-content: space-between; align-items: center; }
+        .btn-ingest { background: var(--warning); color: #000; border: none; padding: 12px 25px; border-radius: 30px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+        .btn-ingest:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+
+        /* Grid Menu */
+        .grid-menu { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .menu-card { background: white; padding: 30px; border-radius: var(--radius); text-align: center; text-decoration: none; color: var(--dark); box-shadow: var(--shadow); transition: 0.3s; }
+        .menu-card:hover { transform: translateY(-5px); }
+        .menu-card i { font-size: 3rem; color: var(--primary); margin-bottom: 15px; }
+
+        /* Models Grid */
+        .popular-models { background: white; padding: 30px; border-radius: var(--radius); box-shadow: var(--shadow); }
+        .models-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 15px; }
+        .model-card { background: var(--gray-light); padding: 15px; border-radius: 8px; cursor: pointer; border-left: 4px solid var(--primary); }
+        .model-card.current { border-left-color: var(--success); background: #e6f4ea; }
+        .model-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 5px; }
+        .badge-recommended { background: var(--success); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+        .badge-fast { background: var(--warning); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
+
+        /* Status Box */
+        .model-status-box { background: white; padding: 20px; border-radius: var(--radius); box-shadow: var(--shadow); border-left: 5px solid var(--secondary); }
+        .model-tag { background: #eee; padding: 2px 8px; border-radius: 4px; font-family: monospace; }
+
+        /* --- TERMINAL LOG OVERLAY --- */
+        .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 2000; display: none; align-items: center; justify-content: center; }
+        .loading-content { background: #1e1e1e; width: 80%; max-width: 800px; border-radius: 8px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); font-family: 'Consolas', monospace; }
+        .loading-header { background: #333; padding: 12px 20px; color: white; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; }
+        .loading-body { padding: 20px; height: 350px; overflow-y: auto; background: #1e1e1e; color: #ccc; font-size: 0.9rem; display: flex; flex-direction: column-reverse; }
+        .loading-footer { padding: 15px; background: #252526; text-align: right; border-top: 1px solid #333; }
+        .log-line { border-bottom: 1px solid #2a2a2a; padding: 2px 0; }
+        .log-success { color: #4caf50; font-weight: bold; }
+        .log-error { color: #f44336; font-weight: bold; }
+        .log-info { color: #2196f3; }
+        .btn-close { background: #555; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; display: none; }
+        .btn-close:hover { background: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo"><i class="fas fa-brain"></i> Library AI</div>
+            <div class="model-selector">
+                <select id="chatModelSelect"></select>
+                <select id="embeddingModelSelect"></select>
+                <button id="applyBtn" class="btn-apply" disabled>Apply Changes</button>
+            </div>
+        </header>
+
+        <div class="action-box">
+            <div>
+                <h3><i class="fas fa-database"></i> Knowledge Base</h3>
+                <p>Status: <span id="kbStatus">Checking...</span></p>
+            </div>
+            <button id="ingestBtn" class="btn-ingest"><i class="fas fa-sync"></i> Re-Build Knowledge Base</button>
+        </div>
+
+        <div class="grid-menu">
+            <a href="/chat" class="menu-card"><i class="fas fa-comments"></i><h3>AI Chat</h3><p>Start Querying</p></a>
+            <a href="/files" class="menu-card"><i class="fas fa-folder-open"></i><h3>Files</h3><p>Manage PDFs</p></a>
+        </div>
+
+        <div class="popular-models">
+            <h4>Recommended Models</h4>
+            <div class="models-grid" id="modelsGrid"></div>
+        </div>
+
+        <div class="model-status-box">
+            <h4>System Status</h4>
+            <p>Chat: <span class="model-tag" id="currentChat">...</span> | Embed: <span class="model-tag" id="currentEmbed">...</span></p>
+            <p>Ollama: <span id="ollamaStatus">...</span></p>
+        </div>
+    </div>
+
+    <div class="loading-overlay" id="terminalOverlay">
+        <div class="loading-content">
+            <div class="loading-header">
+                <span><i class="fas fa-terminal"></i> System Process</span>
+                <i class="fas fa-circle-notch fa-spin" id="spinner"></i>
+            </div>
+            <div class="loading-body" id="logOutput"></div>
+            <div class="loading-footer">
+                <button class="btn-close" id="closeLogBtn" onclick="hideTerminal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Config Data
+        const MODELS = [
+            { name: "all-minilm:latest", type: "embed", desc: "Fastest (CPU)", cat: "fast" },
+            { name: "nomic-embed-text:latest", type: "embed", desc: "Accurate", cat: "recommended" },
+            { name: "qwen:0.5b", type: "chat", desc: "Fastest", cat: "fast" },
+            { name: "phi3.5:latest", type: "chat", desc: "Smartest", cat: "recommended" },
+            { name: "llama3.2:1b", type: "chat", desc: "Balanced", cat: "recommended" }
+        ];
+
+        // Elements
+        const chatSel = document.getElementById('chatModelSelect');
+        const embedSel = document.getElementById('embeddingModelSelect');
+        const applyBtn = document.getElementById('applyBtn');
+        const ingestBtn = document.getElementById('ingestBtn');
+        const logBox = document.getElementById('logOutput');
+        const overlay = document.getElementById('terminalOverlay');
+        const closeBtn = document.getElementById('closeLogBtn');
+        const spinner = document.getElementById('spinner');
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/config');
+                const data = await res.json();
+                
+                // Populate Selects
+                populateSelect(chatSel, data.available_models.chat_models, data.current.chat_model);
+                populateSelect(embedSel, data.available_models.embedding_models, data.current.embedding_model);
+                
+                // Update Status
+                document.getElementById('currentChat').textContent = data.current.chat_model;
+                document.getElementById('currentEmbed').textContent = data.current.embedding_model;
+                
+                renderGrid(data.current.chat_model, data.current.embedding_model);
+                checkHealth();
+            } catch (e) {
+                console.error("Failed to load config", e);
+            }
+        }
+
+        function populateSelect(sel, opts, cur) {
+            sel.innerHTML = '';
+            if(!opts) return;
+            opts.forEach(o => {
+                const opt = document.createElement('option');
+                opt.value = o; opt.textContent = o;
+                if(o === cur) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        }
+
+        function renderGrid(curChat, curEmbed) {
+            const grid = document.getElementById('modelsGrid');
+            grid.innerHTML = '';
+            MODELS.forEach(m => {
+                const div = document.createElement('div');
+                const isCurrent = m.type === 'chat' ? m.name === curChat : m.name === curEmbed;
+                div.className = `model-card ${isCurrent ? 'current' : ''}`;
+                div.innerHTML = `
+                    <div class="model-header"><span>${m.name}</span><span class="badge-${m.cat}">${m.cat}</span></div>
+                    <div style="font-size:0.85rem; color:#666">${m.desc}</div>
+                `;
+                div.onclick = () => {
+                    if(m.type === 'chat') chatSel.value = m.name;
+                    else embedSel.value = m.name;
+                    applyBtn.disabled = false;
+                };
+                grid.appendChild(div);
+            });
+        }
+
+        async function applyChanges() {
+            try {
+                await fetch('/config/model', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ chat_model: chatSel.value, embedding_model: embedSel.value })
+                });
+                location.reload();
+            } catch (e) {
+                alert("Failed to update models");
+            }
+        }
+
+        // STREAMING INGESTION LOGIC
+        async function runIngestion() {
+            if(!confirm("Re-build Knowledge Base? This clears old data.")) return;
+
+            // Open Terminal
+            overlay.style.display = 'flex';
+            logBox.innerHTML = '<div class="log-line">Initializing stream...</div>';
+            closeBtn.style.display = 'none';
+            spinner.style.display = 'block';
+
+            try {
+                const response = await fetch('/ingest/stream');
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const text = decoder.decode(value);
+                    const lines = text.split('\n');
+                    
+                    lines.forEach(line => {
+                        if(line.trim()) {
+                            const div = document.createElement('div');
+                            div.className = 'log-line';
+                            div.textContent = line;
+                            if(line.includes('Error') || line.includes('❌')) div.className += ' log-error';
+                            if(line.includes('Success') || line.includes('✅')) div.className += ' log-success';
+                            if(line.includes('Processing')) div.className += ' log-info';
+                            logBox.prepend(div); // Newest at bottom
+                        }
+                    });
+                }
+            } catch (e) {
+                logBox.innerHTML = `<div class="log-line log-error">Connection Error: ${e.message}</div>` + logBox.innerHTML;
+            } finally {
+                spinner.style.display = 'none';
+                closeBtn.style.display = 'inline-block';
+                checkHealth();
+            }
+        }
+
+        function hideTerminal() { overlay.style.display = 'none'; }
+
+        async function checkHealth() {
+            try {
+                const res = await fetch('/health');
+                const data = await res.json();
+                document.getElementById('kbStatus').textContent = data.vector_store_ready ? "Ready" : "Needs Re-Build";
+                document.getElementById('kbStatus').style.color = data.vector_store_ready ? "green" : "red";
+                document.getElementById('ollamaStatus').textContent = data.ollama_connected ? "Connected" : "Offline";
+            } catch(e) {}
+        }
+
+        // Init
+        loadConfig();
+        applyBtn.onclick = applyChanges;
+        ingestBtn.onclick = runIngestion;
+        chatSel.onchange = () => applyBtn.disabled = false;
+        embedSel.onchange = () => applyBtn.disabled = false;
+    </script>
+</body>
+</html>

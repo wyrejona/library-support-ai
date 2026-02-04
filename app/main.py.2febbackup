@@ -1,0 +1,289 @@
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
+from fastapi.templating import Jinja2Templates
+import os
+import shutil
+from datetime import datetime
+from typing import List, Optional
+import uvicorn
+from pathlib import Path
+import subprocess
+import asyncio
+import sys
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Add the app directory to Python path
+current_file = Path(__file__).resolve()
+app_dir = current_file.parent
+project_root = app_dir.parent
+
+sys.path.insert(0, str(app_dir))
+sys.path.insert(0, str(project_root))
+
+# Import configuration FIRST
+try:
+    from app.config import config
+    logger.info("✓ Configuration loaded")
+except ImportError as e:
+    logger.error(f"Failed to import config: {e}")
+    sys.exit(1)
+
+# Import custom modules
+try:
+    from app.utils import VectorStore, format_context
+    from app.ai.llm import OllamaClient
+    logger.info("✓ Imported modules")
+except ImportError as e:
+    logger.error(f"Import failed: {e}")
+    sys.exit(1)
+
+# Initialize components
+try:
+    vector_store = VectorStore()
+    llm_client = OllamaClient()
+    logger.info(f"✓ Components initialized with model: {config.chat_model}")
+except Exception as e:
+    logger.error(f"Failed to initialize components: {e}")
+    vector_store = None
+    llm_client = None
+
+# Initialize FastAPI
+app = FastAPI(
+    title=config.app_name,
+    version=config.app_version,
+    description="University of Embu Library Support AI"
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Directories
+pdfs_dir = config.pdfs_dir
+data_dir = config.data_dir
+templates_dir = config.templates_dir
+
+# Templates
+if not templates_dir.exists():
+    os.makedirs(templates_dir, exist_ok=True)
+templates = Jinja2Templates(directory=str(templates_dir))
+
+def format_file_size(bytes):
+    if bytes == 0: return "0 Bytes"
+    size_names = ["Bytes", "KB", "MB", "GB", "TB"]
+    i = 0
+    while bytes >= 1024 and i < len(size_names) - 1:
+        bytes /= 1024.0
+        i += 1
+    return f"{bytes:.2f} {size_names[i]}"
+
+# ==================== ROUTES ====================
+
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "app_name": config.app_name,
+        "app_version": config.app_version,
+        "current_model": config.chat_model
+    })
+
+@app.get("/files", response_class=HTMLResponse)
+async def manage_files(request: Request):
+    files = []
+    if pdfs_dir.exists():
+        for f in os.listdir(pdfs_dir):
+            if f.endswith(".pdf"):
+                file_path = pdfs_dir / f
+                files.append({
+                    "name": f,
+                    "size": os.path.getsize(file_path),
+                    "modified": datetime.fromtimestamp(os.path.getmtime(file_path)),
+                    "formatted_size": format_file_size(os.path.getsize(file_path))
+                })
+    files.sort(key=lambda x: x["modified"], reverse=True)
+    
+    vector_status = "Ready" if os.path.exists(config.vector_store_path / "vector_index.bin") else "Not processed"
+    total_size = format_file_size(sum(f["size"] for f in files) if files else 0)
+
+    return templates.TemplateResponse("files.html", {
+        "request": request,
+        "files": files,
+        "total_files": len(files),
+        "total_size": total_size,
+        "vector_status": vector_status,
+        "current_model": config.chat_model,
+        "embedding_model": config.embedding_model
+    })
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    files_count = len([f for f in os.listdir(pdfs_dir) if f.endswith(".pdf")]) if pdfs_dir.exists() else 0
+    return templates.TemplateResponse("chat.html", {
+        "request": request,
+        "total_files": files_count,
+        "current_model": config.chat_model
+    })
+
+@app.post("/chat")
+async def chat_api(request_data: dict):
+    user_message = request_data.get("message") or request_data.get("query") or ""
+    if not user_message:
+        return {"response": "Please enter a question."}
+    
+    try:
+        # 1. Search
+        search_results = vector_store.search(user_message, k=config.search_default_k)
+        context = format_context(search_results, max_length=config.max_context_length)
+        
+        # 2. Generate
+        response = llm_client.generate_response(prompt=user_message, context=context)
+        
+        return {
+            "response": response,
+            "context_used": len(context) > 0,
+            "model_used": config.chat_model
+        }
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return {"response": "System error. Please try again.", "error": str(e)}
+
+# --- STREAMING INGESTION ENDPOINT ---
+@app.get("/ingest/stream")
+async def stream_ingestion():
+    """Run ingestion script and stream logs to client"""
+    
+    async def log_generator():
+        ingest_script = project_root / "ingest.py"
+        
+        # Run python script unbuffered
+        process = subprocess.Popen(
+            ["python3", "-u", str(ingest_script)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+
+        yield "🚀 Starting ingestion process...\n"
+        
+        # Stream output line by line
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                yield line
+
+        # Final status
+        if process.returncode == 0:
+            yield "\n✅ Ingestion Completed Successfully!\n"
+            # Reload vector store in memory so the new data is available immediately
+            vector_store.load()
+        else:
+            yield f"\n❌ Process failed with exit code {process.returncode}\n"
+
+    return StreamingResponse(log_generator(), media_type="text/plain")
+
+@app.post("/upload")
+async def upload_files(files: List[UploadFile] = File(...)):
+    uploaded = []
+    for file in files:
+        if file.filename.lower().endswith('.pdf'):
+            path = pdfs_dir / file.filename
+            with open(path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            uploaded.append({"name": file.filename})
+    return {"status": "success", "uploaded": uploaded}
+
+@app.delete("/files/{filename}")
+async def delete_file(filename: str):
+    path = pdfs_dir / filename
+    if path.exists():
+        os.remove(path)
+        return {"status": "deleted"}
+    raise HTTPException(404, "File not found")
+
+@app.delete("/clear-all-files")
+async def clear_all_files():
+    try:
+        # Clear PDFs
+        if pdfs_dir.exists():
+            for f in os.listdir(pdfs_dir):
+                os.remove(pdfs_dir / f)
+        # Clear Data
+        if config.vector_store_path.exists():
+            shutil.rmtree(config.vector_store_path)
+            os.makedirs(config.vector_store_path, exist_ok=True)
+        # Reset memory
+        vector_store.loaded = False
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/config")
+async def get_configuration():
+    return {
+        "current": {
+            "chat_model": config.chat_model,
+            "embedding_model": config.embedding_model,
+            "ollama_base_url": config.ollama_base_url
+        },
+        "available_models": config.get_available_models()
+    }
+
+@app.put("/config/model")
+async def update_model(data: dict):
+    success = True
+    if "chat_model" in data:
+        success &= config.update_config("ollama", "chat_model", data["chat_model"])
+        llm_client.model = data["chat_model"]
+    
+    if "embedding_model" in data:
+        success &= config.update_config("ollama", "embedding_model", data["embedding_model"])
+        vector_store.embedding_model = data["embedding_model"]
+        
+    return {"success": success}
+
+@app.get("/system/info")
+def system_info():
+    import psutil
+    mem = psutil.virtual_memory()
+    return {
+        "total_gb": round(mem.total / 1024**3, 1),
+        "available_gb": round(mem.available / 1024**3, 1),
+        "percent": mem.percent
+    }
+
+
+@app.get("/health")
+async def health_check():
+    ollama_ok = False
+    try:
+        import requests
+        requests.get(f"{config.ollama_base_url}/api/tags", timeout=2)
+        ollama_ok = True
+    except: pass
+    
+    return {
+        "status": "healthy",
+        "vector_store_ready": vector_store.loaded,
+        "ollama_connected": ollama_ok,
+        "current_model": config.chat_model
+    }
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
